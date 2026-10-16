@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <title>Rectorat - Gestion des Remplacements</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        :root { --primary: #00448f; --bg: #f4f7f6; --text: #333; }
+        body { margin: 0; display: flex; height: 100vh; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--bg); color: var(--text); }
+        .main-nav { width: 85px; background: var(--primary); display: flex; flex-direction: column; align-items: center; padding-top: 20px; z-index: 2000; box-shadow: 2px 0 5px rgba(0,0,0,0.2); }
+        .nav-item { color: white; margin-bottom: 25px; cursor: pointer; text-align: center; font-size: 11px; opacity: 0.6; transition: 0.2s; text-transform: uppercase; font-weight: bold; width: 100%; }
+        .nav-item:hover, .nav-item.active { opacity: 1; background: rgba(255,255,255,0.1); padding: 5px 0; }
+        .nav-item .icon { font-size: 26px; display: block; margin-bottom: 5px; }
+        .view-container { flex: 1; display: none; height: 100%; overflow: hidden; }
+        .view-container.active { display: flex; flex-direction: column; }
+        .map-layout { display: flex; height: 100%; width: 100%; }
+        #sidebar-action { width: 350px; background: white; padding: 20px; overflow-y: auto; box-shadow: 2px 0 5px rgba(0,0,0,0.05); z-index: 1000; }
+        #map { flex: 1; height: 100%; z-index: 1; }
+        .data-layout { padding: 30px; overflow-y: auto; width: 100%; box-sizing: border-box; }
+        .header-title { font-size: 24px; margin-top: 0; border-bottom: 2px solid #ddd; padding-bottom: 10px; margin-bottom: 20px; }
+        .card { background: white; border-radius: 8px; padding: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 20px; }
+        .grid-form { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+        .form-group { margin-bottom: 10px; }
+        .form-group label { display: block; font-size: 12px; font-weight: bold; margin-bottom: 4px; color: #555; }
+        .form-group input[type="text"], .form-group input[type="number"], .form-group input[type="email"], .form-group input[type="tel"], .form-group select { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; }
+        .btn { background: #28a745; color: white; border: none; padding: 10px 15px; cursor: pointer; border-radius: 4px; font-weight: bold; }
+        .btn:hover { background: #218838; }
+        .btn-action { background: #00448f; width: 100%; margin-top: 10px;}
+        .btn-small { padding: 5px 8px; font-size: 11px; margin-right: 5px; border-radius: 3px; cursor: pointer; border: none; color: white; }
+        .btn-edit { background: #ffc107; color: #000; }
+        .btn-delete { background: #dc3545; }
+        table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
+        th, td { text-align: left; padding: 12px 15px; border-bottom: 1px solid #eee; font-size: 14px; }
+        th { background-color: var(--primary); color: white; font-weight: normal; }
+        tr:hover { background-color: #f8f9fa; }
+        .badge { background: #e9ecef; color: #333; padding: 4px 8px; border-radius: 12px; font-size: 11px; font-weight: bold; }
+        .badge.green { background: #d4edda; color: #155724; }
+        .autocomplete-wrapper { position: relative; width: 100%; }
+        .autocomplete-items { position: absolute; border: 1px solid #d4d4d4; border-bottom: none; border-top: none; z-index: 99; top: 100%; left: 0; right: 0; max-height: 200px; overflow-y: auto; background-color: white; box-shadow: 0 4px 6px rgba(0,0,0,0.1); border-radius: 0 0 4px 4px; }
+        .autocomplete-items div { padding: 10px; cursor: pointer; border-bottom: 1px solid #d4d4d4; font-size: 13px; }
+        .autocomplete-items div:hover { background-color: #e9e9e9; }
+    </style>
+</head>
+<body>
+
+    <div class="main-nav">
+        <div class="nav-item active" id="nav-map" onclick="switchTab('map')"><span class="icon">🗺️</span>Carte</div>
+        <div class="nav-item" id="nav-besoins" onclick="switchTab('besoins')"><span class="icon">📋</span>Besoins</div>
+        <div class="nav-item" id="nav-profs" onclick="switchTab('profs')"><span class="icon">👨‍🏫</span>RH Profs</div>
+        <div class="nav-item" id="nav-etabs" onclick="switchTab('etabs')"><span class="icon">🏫</span>Écoles</div>
+    </div>
+
+    <!-- VUE 1 : CARTE OPERATIONNELLE -->
+    <div id="view-map" class="view-container active">
+        <div class="map-layout">
+            <div id="sidebar-action">
+                <div class="card" style="padding: 15px; margin-bottom: 20px; border-left: 4px solid #17a2b8;">
+                    <h4 style="margin-top: 0; color: #17a2b8;">Filtres d'affichage</h4>
+                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                        <input type="checkbox" id="filter-secondaire" checked onchange="appliquerFiltres()"><label style="font-size: 13px; cursor: pointer;" for="filter-secondaire">🏫 Secondaire (Rouge)</label>
+                    </div>
+                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 12px;">
+                        <input type="checkbox" id="filter-primaire" checked onchange="appliquerFiltres()"><label style="font-size: 13px; cursor: pointer;" for="filter-primaire">🏫 Primaire (Bleu)</label>
+                    </div>
+                    <hr style="border: 0; border-top: 1px solid #eee; margin: 10px 0;">
+                    <div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+                        <input type="checkbox" id="filter-profs" checked onchange="appliquerFiltres()"><label style="font-size: 13px; cursor: pointer; font-weight: bold;" for="filter-profs">👨‍🏫 Professeurs (Vert)</label>
+                    </div>
+                    <div class="form-group" style="margin-bottom: 0;">
+                        <select id="filter-matiere" onchange="appliquerFiltres()" style="font-size: 12px; padding: 4px;"><option value="Toutes">Toutes les disciplines</option></select>
+                    </div>
+                </div>
+                <h3 style="margin-top: 0; color: var(--primary);">Résultat de la Recherche</h3>
+                <div id="search-results"></div>
+            </div>
+            <div id="map"></div>
+        </div>
+    </div>
+
+    <!-- VUE 2 : TABLEAU DES BESOINS -->
+    <div id="view-besoins" class="view-container">
+        <div class="data-layout">
+            <h2 class="header-title">Besoins non pourvus déclarés par les établissements</h2>
+            <div class="card">
+                <table>
+                    <thead><tr><th>Date</th><th>Établissement</th><th>Discipline</th><th>Volume d'heures</th><th>Actions</th></tr></thead>
+                    <tbody id="table-besoins-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- VUE 3 : GESTION DES PROFESSEURS -->
+    <div id="view-profs" class="view-container">
+        <div class="data-layout">
+            <h2 class="header-title">Base de données Enseignants (TZR & Contractuels)</h2>
+            <div class="card">
+                <h4 style="margin-top: 0;" id="form-title">Créer une nouvelle fiche enseignant</h4>
+                <input type="hidden" id="edit-id" value="">
+                <div class="grid-form">
+                    <div class="form-group"><label>Nom complet</label><input type="text" id="add-nom" placeholder="Ex: M. Curie"></div>
+                    <div class="form-group"><label>Discipline (Concours)</label><select id="add-discipline"></select></div>
+                    <div class="form-group"><label>Statut</label><select id="add-statut" onchange="updateFormUI()"><option value="TZR">TZR</option><option value="Contractuel">Contractuel</option></select></div>
+                    <div class="form-group"><label>Corps d'appartenance</label><select id="add-corps"><option value="Certifié">Certifié (18h)</option><option value="Agrégé">Agrégé (15h)</option><option value="Contractuel">Contractuel (18h)</option></select></div>
+                    <div class="form-group"><label>Téléphone</label><input type="tel" id="add-telephone" placeholder="06 12 34 56 78"></div>
+                    <div class="form-group"><label>Email</label><input type="email" id="add-email" placeholder="prenom.nom@ac-creteil.fr"></div>
+                    <div class="form-group"><label>Quotité (%)</label><input type="number" id="add-quotite" value="100"></div>
+                    <div class="form-group"><label>Heures déjà pourvues</label><input type="number" id="add-heures-actuelles" value="0" step="0.5"></div>
+                </div>
+                <div class="form-group" style="margin-top: 10px;">
+                    <label id="label-adresse">Établissement de rattachement (RAD)</label>
+                    <div class="autocomplete-wrapper"><input type="text" id="add-adresse" placeholder="Tapez le nom de l'établissement..." autocomplete="off" oninput="chercherAdresseOuEtablissement(this.value)"><div id="autocomplete-list" class="autocomplete-items"></div></div>
+                </div>
+                <div class="grid-form" style="opacity: 0.6; display: none;">
+                    <div class="form-group"><input type="text" id="add-lat" readonly></div><div class="form-group"><input type="text" id="add-lng" readonly></div>
+                </div>
+                <div style="display: flex; gap: 10px; margin-top: 15px;">
+                    <button class="btn" id="btn-save" onclick="sauvegarderProf()">💾 Enregistrer la fiche</button>
+                    <button class="btn" style="background: #6c757d; display: none;" id="btn-cancel" onclick="resetForm()">❌ Annuler</button>
+                </div>
+            </div>
+            <div class="card">
+                <h4 style="margin-top: 0;">Annuaire des enseignants</h4>
+                <table>
+                    <thead><tr><th>Nom & Contact</th><th>Statut</th><th>Discipline</th><th>Rattachement</th><th>Disponibilité</th><th>Actions</th></tr></thead>
+                    <tbody id="table-profs-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- VUE 4 : ÉTABLISSEMENTS -->
+    <div id="view-etabs" class="view-container">
+        <div class="data-layout">
+            <h2 class="header-title">Établissements du secteur</h2>
+            <div class="card">
+                <table>
+                    <thead><tr><th>UAI</th><th>Nom de l'établissement</th><th>Type</th><th>Secteur</th></tr></thead>
+                    <tbody id="table-etabs-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        let referentiel = {}, matieresFlattened = [], etablissementsData = [], professeursData = [], besoinsData = [], autocompleteTimeout = null;
+        const map = L.map('map').setView([48.793, 2.396], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', { maxZoom: 20 }).addTo(map);
+        let layerPrimaire = L.featureGroup().addTo(map); let layerSecondaire = L.featureGroup().addTo(map); let layerProfs = L.featureGroup().addTo(map);
+
+        function switchTab(tabId) {
+            document.querySelectorAll('.view-container').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
+            document.getElementById('view-' + tabId).classList.add('active');
+            document.getElementById('nav-' + tabId).classList.add('active');
+            if (tabId === 'map') setTimeout(() => map.invalidateSize(), 200);
+            if (tabId === 'besoins') chargerBesoins();
+        }
+
+        fetch('http://localhost:8000/api/referentiel').then(res => res.json()).then(data => {
+            referentiel = data;
+            const selectDisciplineRH = document.getElementById('add-discipline'), selectFiltreMap = document.getElementById('filter-matiere');
+            Object.keys(referentiel).forEach(discOfficielle => {
+                selectDisciplineRH.appendChild(new Option(discOfficielle, discOfficielle)); selectFiltreMap.appendChild(new Option(discOfficielle, discOfficielle));
+                matieresFlattened = matieresFlattened.concat(referentiel[discOfficielle]);
+            });
+            matieresFlattened = [...new Set(matieresFlattened)].sort();
+            chargerCarteEtablissements(); chargerProfesseurs(); chargerEtablissementsTable(); chargerBesoins();
+        });
+
+        function chargerCarteEtablissements() {
+            fetch('http://localhost:8000/api/etablissements').then(res => res.json()).then(data => {
+                etablissementsData = data;
+                layerPrimaire.clearLayers(); layerSecondaire.clearLayers();
+                data.forEach(etab => {
+                    if (etab.degre === "Autre") return;
+                    const marker = L.marker([etab.latitude, etab.longitude], {
+                        icon: L.icon({
+                            iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-${etab.degre === "Secondaire" ? "red" : "blue"}.png`,
+                            shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+                            iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34]
+                        })
+                    });
+                    
+                    if (etab.degre === "Secondaire") {
+                        let optionsMatieres = matieresFlattened.map(m => `<option value="${m}">${m}</option>`).join("");
+                        // NOUVEAU : 2 Boutons (Rechercher / Enregistrer)
+                        marker.bindPopup(`
+                            <div style="min-width: 230px;">
+                                <strong style="display:block; margin-bottom:8px; border-bottom:1px solid #ddd; padding-bottom:5px; font-size:14px;">${etab.nom}</strong>
+                                <div style="display: flex; gap: 8px; margin-bottom: 12px;">
+                                    <div style="flex: 2; min-width: 0;">
+                                        <label style="font-size:10px; color:#666; display:block; margin-bottom:2px; font-weight:bold;">MATIÈRE</label>
+                                        <select id="matiere-${etab.uai}" style="width: 100%; padding: 6px; box-sizing: border-box; border:1px solid #ccc; border-radius:4px; font-size:12px;">${optionsMatieres}</select>
+                                    </div>
+                                    <div style="flex: 1; min-width: 0;">
+                                        <label style="font-size:10px; color:#666; display:block; margin-bottom:2px; font-weight:bold;">HEURES</label>
+                                        <input type="number" id="heures-${etab.uai}" value="18" min="0.5" step="0.5" style="width: 100%; padding: 6px; box-sizing: border-box; border:1px solid #ccc; border-radius:4px; font-size:12px;">
+                                    </div>
+                                </div>
+                                <div style="display:flex; gap: 5px;">
+                                    <button class="btn btn-action" style="margin:0; flex:1; padding:6px; font-size:12px;" onclick="declarerBesoin(${etab.latitude}, ${etab.longitude}, '${etab.uai}', '${etab.nom.replace(/'/g, "\\'")}')">🔍 Chercher</button>
+                                    <button class="btn" style="margin:0; flex:1; padding:6px; font-size:12px; background:#17a2b8;" onclick="sauvegarderNouveauBesoin('${etab.uai}')">💾 Conserver</button>
+                                </div>
+                            </div>
+                        `);
+                        marker.addTo(layerSecondaire);
+                    } else {
+                        marker.bindPopup(`<strong>${etab.nom}</strong>`); marker.addTo(layerPrimaire);
+                    }
+                });
+            });
+        }
+
+        window.appliquerFiltres = function() {
+            document.getElementById('filter-primaire').checked ? map.addLayer(layerPrimaire) : map.removeLayer(layerPrimaire);
+            document.getElementById('filter-secondaire').checked ? map.addLayer(layerSecondaire) : map.removeLayer(layerSecondaire);
+            layerProfs.clearLayers();
+            if (document.getElementById('filter-profs').checked) {
+                const matiereFiltre = document.getElementById('filter-matiere').value;
+                professeursData.forEach(p => {
+                    if (matiereFiltre !== "Toutes" && p.discipline !== matiereFiltre) return;
+                    L.marker([p.latitude, p.longitude], {
+                        icon: L.icon({
+                            iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png`,
+                            shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+                            iconSize: [25, 41], iconAnchor: [12, 41], popupAnchor: [1, -34]
+                        })
+                    }).bindPopup(`<strong>${p.nom}</strong> <span class="badge">${p.statut}</span><br><i>${p.discipline}</i><br>📞 ${p.telephone || '-'}<br><span class="badge green" style="margin-top: 5px; display: inline-block;">Dispo : ${p.heures_restantes}h</span>`).addTo(layerProfs);
+                });
+            }
+        };
+
+        // --- GESTION DES BESOINS (NOUVEAU) ---
+        window.sauvegarderNouveauBesoin = function(uai) {
+            const discipline = document.getElementById(`matiere-${uai}`).value;
+            const heures = parseFloat(document.getElementById(`heures-${uai}`).value);
+            fetch('http://localhost:8000/api/besoins', {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ uai: uai, discipline: discipline, heures: heures })
+            }).then(res => res.json()).then(res => { alert(res.message); chargerBesoins(); });
+        };
+
+        function chargerBesoins() {
+            fetch('http://localhost:8000/api/besoins').then(res => res.json()).then(besoins => {
+                besoinsData = besoins;
+                const tbody = document.getElementById('table-besoins-body');
+                tbody.innerHTML = "";
+                besoins.forEach(b => {
+                    const tr = document.createElement('tr');
+                    tr.innerHTML = `
+                        <td>${b.date}</td>
+                        <td><strong>${b.nom_etablissement}</strong></td>
+                        <td>${b.discipline}</td>
+                        <td><span class="badge" style="background:#dc3545; color:white;">Manque ${b.heures}h</span></td>
+                        <td>
+                            <button class="btn-small" style="background:#00448f;" onclick="rechercherDepuisBesoin(${b.latitude}, ${b.longitude}, '${b.uai}', '${b.nom_etablissement.replace(/'/g, "\\'")}', '${b.discipline}', ${b.heures})">🔍 Trouver un prof</button>
+                            <button class="btn-small btn-delete" onclick="supprimerBesoin(${b.id})">🗑️ Clôturer</button>
+                        </td>
+                    `;
+                    tbody.appendChild(tr);
+                });
+            });
+        }
+
+        window.supprimerBesoin = function(id) {
+            if(confirm("Confirmer la clôture/suppression de ce besoin ?")) {
+                fetch(`http://localhost:8000/api/besoins/${id}`, { method: 'DELETE' }).then(res => res.json()).then(res => { chargerBesoins(); });
+            }
+        };
+
+        // Fonction "magique" : Clic depuis le tableau des besoins -> Recherche sur la carte
+        window.rechercherDepuisBesoin = function(lat, lng, uai, nomEtab, disciplineForcee, heuresForcees) {
+            switchTab('map');
+            map.setView([lat, lng], 14);
+            declarerBesoin(lat, lng, uai, nomEtab, disciplineForcee, heuresForcees);
+        };
+
+        window.declarerBesoin = function(lat, lng, uai, nomEtab, disciplineForcee = null, heuresForcees = null) {
+            // Utilise les valeurs de l'interface SI on clique sur la carte, SINON utilise les valeurs forcées par le tableau "Besoins"
+            const matiereRequise = disciplineForcee || document.getElementById(`matiere-${uai}`).value; 
+            const heuresRequises = heuresForcees || (parseFloat(document.getElementById(`heures-${uai}`).value) || 0);
+
+            fetch(`http://localhost:8000/api/match?lat=${lat}&lng=${lng}&matiere=${encodeURIComponent(matiereRequise)}&heures_requises=${heuresRequises}&rayon_metres=5000`)
+                .then(res => res.json()).then(profs => {
+                    const searchBox = document.getElementById('search-results');
+                    let html = `<div style="background: #f8f9fa; padding: 15px; border-radius: 5px; border-left: 4px solid var(--primary); margin-bottom: 15px;"><h4 style="margin: 0 0 5px 0;">${nomEtab}</h4>Besoin : <b>${heuresRequises}h</b> en <b>${matiereRequise}</b></div>`;
+                    if (profs.length === 0) html += `<p style="color:red;">Aucun professeur n'a assez d'heures libres (${heuresRequises}h) dans ce secteur (5km).</p>`;
+                    else {
+                        profs.forEach(p => {
+                            html += `<div class="card" style="padding: 15px; margin-bottom:10px;">
+                                        <strong>${p.nom}</strong> <span class="badge">${p.corps} ${p.statut}</span><br>
+                                        <div style="font-size: 12px; margin-top: 5px;"><i>Concours : <b>${p.discipline}</b></i></div>
+                                        <div style="font-size: 12px; color: #666; margin: 4px 0;">📍 ${p.adresse}</div>
+                                        <span class="badge green">Solde actuel : ${p.heures_restantes}h / ${p.heures_max}h</span>
+                                        <button class="btn" style="width: 100%; margin-top: 10px;" onclick="affecterProfesseur(${p.id}, ${heuresRequises}, '${p.nom.replace(/'/g, "\\'")}')">Affecter pour ${heuresRequises}h</button>
+                                    </div>`;
+                        });
+                    }
+                    searchBox.innerHTML = html;
+                });
+        };
+
+        window.affecterProfesseur = function(profId, heures, nomProf) {
+            if(confirm(`Confirmez-vous l'affectation de ${heures}h à ${nomProf} ? Son solde disponible sera déduit.`)) {
+                fetch('http://localhost:8000/api/affecter', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prof_id: profId, heures: heures }) })
+                .then(res => res.json()).then(res => {
+                    alert(res.message); chargerProfesseurs();
+                    document.getElementById('search-results').innerHTML = `<p style="color:green; font-weight:bold;">✅ ${nomProf} a été affecté(e) avec succès.</p>`;
+                });
+            }
+        };
+
+        /* --- FONCTIONS RH (Autocomplétion et CRUD identiques) --- */
+        function updateFormUI() {
+            const statut = document.getElementById('add-statut').value;
+            const label = document.getElementById('label-adresse');
+            document.getElementById('add-adresse').value = ''; document.getElementById('add-lat').value = ''; document.getElementById('add-lng').value = '';
+            if(statut === "TZR") {
+                label.innerText = "Établissement de rattachement (RAD)"; document.getElementById('add-adresse').placeholder = "Tapez le nom de l'établissement...";
+            } else {
+                label.innerText = "Adresse personnelle complète"; document.getElementById('add-corps').value = "Contractuel"; document.getElementById('add-adresse').placeholder = "Tapez une adresse postale...";
+            }
+        }
+
+        window.chercherAdresseOuEtablissement = function(valeur) {
+            const listDiv = document.getElementById('autocomplete-list'); listDiv.innerHTML = '';
+            if (valeur.length < 3) return;
+            if (document.getElementById('add-statut').value === "TZR") {
+                etablissementsData.filter(e => e.nom.toLowerCase().includes(valeur.toLowerCase())).slice(0, 8).forEach(match => {
+                    const item = document.createElement('div'); item.innerHTML = `<strong>${match.nom}</strong>`;
+                    item.onclick = function() { document.getElementById('add-adresse').value = match.nom; document.getElementById('add-lat').value = match.latitude; document.getElementById('add-lng').value = match.longitude; listDiv.innerHTML = ''; };
+                    listDiv.appendChild(item);
+                });
+            } else {
+                clearTimeout(autocompleteTimeout);
+                autocompleteTimeout = setTimeout(() => {
+                    fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(valeur)}&autocomplete=1&limit=5`)
+                        .then(res => res.json()).then(data => {
+                            if(data.features) {
+                                data.features.forEach(f => {
+                                    const item = document.createElement('div'); item.innerHTML = `<strong>${f.properties.name}</strong> <small>(${f.properties.city})</small>`;
+                                    item.onclick = function() { document.getElementById('add-adresse').value = f.properties.label; document.getElementById('add-lng').value = f.geometry.coordinates[0]; document.getElementById('add-lat').value = f.geometry.coordinates[1]; listDiv.innerHTML = ''; };
+                                    listDiv.appendChild(item);
+                                });
+                            }
+                        });
+                }, 300);
+            }
+        };
+        document.addEventListener("click", function (e) { if (e.target.id !== "add-adresse") document.getElementById('autocomplete-list').innerHTML = ''; });
+
+        window.resetForm = function() {
+            document.getElementById('edit-id').value = ""; document.getElementById('form-title').innerText = "Créer une nouvelle fiche enseignant";
+            document.getElementById('btn-save').innerText = "💾 Enregistrer la fiche"; document.getElementById('btn-cancel').style.display = "none";
+            ['add-nom', 'add-telephone', 'add-email', 'add-adresse', 'add-lat', 'add-lng'].forEach(id => document.getElementById(id).value = "");
+            document.getElementById('add-heures-actuelles').value = "0"; document.getElementById('add-quotite').value = "100"; updateFormUI();
+        };
+
+        window.editerProf = function(id) {
+            const prof = professeursData.find(p => p.id === id); if(!prof) return;
+            document.getElementById('edit-id').value = prof.id; document.getElementById('form-title').innerText = `Modifier la fiche : ${prof.nom}`;
+            document.getElementById('btn-save').innerText = "🔄 Mettre à jour la fiche"; document.getElementById('btn-cancel').style.display = "block";
+            document.getElementById('add-nom').value = prof.nom; document.getElementById('add-discipline').value = prof.discipline;
+            document.getElementById('add-statut').value = prof.statut; document.getElementById('add-corps').value = prof.corps;
+            document.getElementById('add-telephone').value = prof.telephone || ""; document.getElementById('add-email').value = prof.email || "";
+            document.getElementById('add-heures-actuelles').value = prof.heures_actuelles;
+            const base = prof.corps === "Agrégé" ? 15 : 18; document.getElementById('add-quotite').value = Math.round((prof.heures_max / base) * 100);
+            document.getElementById('add-adresse').value = prof.adresse; document.getElementById('add-lat').value = prof.latitude; document.getElementById('add-lng').value = prof.longitude;
+            window.scrollTo({ top: 0, behavior: 'smooth' });
+        };
+
+        window.supprimerProf = function(id) { if(confirm("Supprimer cet enseignant ?")) fetch(`http://localhost:8000/api/professeurs/${id}`, { method: 'DELETE' }).then(res => res.json()).then(res => { chargerProfesseurs(); }); };
+        
+        window.sauvegarderProf = function() {
+            const lat = document.getElementById('add-lat').value; if(!lat) return alert("Veuillez sélectionner une adresse valide.");
+            const profId = document.getElementById('edit-id').value;
+            const method = profId ? 'PUT' : 'POST', url = profId ? `http://localhost:8000/api/professeurs/${profId}` : 'http://localhost:8000/api/professeurs';
+            fetch(url, { method: method, headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    nom: document.getElementById('add-nom').value, statut: document.getElementById('add-statut').value, corps: document.getElementById('add-corps').value,
+                    discipline: document.getElementById('add-discipline').value, adresse_libelle: document.getElementById('add-adresse').value, type_adresse: document.getElementById('add-statut').value === "TZR" ? "Rattachement" : "Personnelle",
+                    latitude: parseFloat(lat), longitude: parseFloat(document.getElementById('add-lng').value), quotite: parseFloat(document.getElementById('add-quotite').value),
+                    heures_actuelles: parseFloat(document.getElementById('add-heures-actuelles').value), telephone: document.getElementById('add-telephone').value, email: document.getElementById('add-email').value
+                })
+            }).then(res => res.json()).then(res => { chargerProfesseurs(); resetForm(); });
+        };
+        function chargerProfesseurs() {
+            fetch('http://localhost:8000/api/professeurs').then(res => res.json()).then(profs => {
+                professeursData = profs; appliquerFiltres(); 
+                const tbody = document.getElementById('table-profs-body'); tbody.innerHTML = "";
+                profs.forEach(p => { tbody.innerHTML += `<tr><td><strong>${p.nom}</strong><br><small>📧 ${p.email || '-'}</small><br><small>📞 ${p.telephone || '-'}</small></td><td><span class="badge">${p.statut}</span><br><small>${p.corps}</small></td><td>${p.discipline}</td><td>${p.adresse}<br><small>(${p.type_adresse})</small></td><td><span class="badge green">${p.heures_restantes}h libres</span><br><small>Affectées: ${p.heures_actuelles}h</small></td><td><button class="btn-small btn-edit" onclick="editerProf(${p.id})">✏️</button><button class="btn-small btn-delete" onclick="supprimerProf(${p.id})">🗑️</button></td></tr>`; });
+            });
+        }
+        function chargerEtablissementsTable() {
+            const tbody = document.getElementById('table-etabs-body'); if (tbody.innerHTML !== "") return; 
+            etablissementsData.forEach(e => { if (e.degre !== "Autre") tbody.innerHTML += `<tr><td><code>${e.uai}</code></td><td><strong>${e.nom}</strong></td><td>${e.type}</td><td><span class="badge">${e.degre}</span></td></tr>`; });
+        }
+    </script>
+</body>
+</html>
