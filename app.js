@@ -11,9 +11,11 @@ let postesEcoleActuelle = [];
 let besoinActifContext = null;
 let autocompleteTimeout = null;
 
-let map, layerPrimaire, layerSecondaire, layerProfs;
+// Couches de la carte dédiées au besoin sélectionné
+let map, layerBesoinsEtabs, layerFocusEtab, layerFocusProfs, layerItineraire;
+let candidatsMatchingActuels = [];
+let ecoleMatchingActuelle = null;
 
-// Sécurise les apostrophes et valeurs nulles dans les attributs onclick
 function esc(str) {
     return String(str || '').replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 }
@@ -39,7 +41,9 @@ function switchTab(tabId) {
     document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
     document.getElementById('view-' + tabId).classList.add('active');
     document.getElementById('nav-' + tabId).classList.add('active');
-    if (tabId === 'map') initMap();
+    if (tabId === 'besoins') {
+        initMap();
+    }
 }
 
 // --- 1. CHARGEMENT DU RÉFÉRENTIEL OFFICIEL (RECTORAT) ---
@@ -119,7 +123,6 @@ function chargerEtablissements() {
     fetch(`${API_URL}/etablissements`).then(r => r.json()).then(data => {
         etablissementsData = data;
         afficherTableEtabs(data);
-        chargerCarteEtablissements();
     });
 }
 
@@ -171,7 +174,6 @@ function validerLoginEcole() {
 function chargerDonneesEcoleConnectee() {
     if (!ecoleConnectee) return;
 
-    // 1. Matières de l'établissement
     fetch(`${API_URL}/ecoles/${ecoleConnectee.uai}/matieres`).then(r => r.json()).then(mats => {
         matieresEcoleActuelle = mats;
         const tbMat = document.getElementById('ecole-table-matieres');
@@ -194,7 +196,6 @@ function chargerDonneesEcoleConnectee() {
         });
     });
 
-    // 2. Postes de l'établissement
     fetch(`${API_URL}/ecoles/${ecoleConnectee.uai}/professeurs`).then(r => r.json()).then(postes => {
         postesEcoleActuelle = postes;
         const tbody = document.getElementById('ecole-table-postes');
@@ -216,7 +217,6 @@ function chargerDonneesEcoleConnectee() {
         }
     });
 
-    // 3. Suivi des demandes et affectations de l'école (sans colonne Poste concerné)
     Promise.all([
         fetch(`${API_URL}/besoins`).then(r => r.json()),
         fetch(`${API_URL}/affectations`).then(r => r.json())
@@ -336,10 +336,11 @@ function ecoleDeclarerBesoin() {
     }).catch(err => alert(err.message));
 }
 
-// --- 3. ESPACE RECTORAT : BESOINS, DÉTECTION & QUALIFICATION DE MATIÈRE ---
+// --- 3. ESPACE RECTORAT : INTERFACE UNIFIÉE BESOINS + CARTE ---
 function loginRectorat() {
     document.getElementById('menu-rectorat').style.display = "flex";
     switchTab('besoins');
+    retourListeBesoins();
     chargerReferentiel();
     chargerBesoins();
     chargerEtablissements();
@@ -347,13 +348,29 @@ function loginRectorat() {
     chargerAffectations();
 }
 
+function initMap() {
+    if (!map) {
+        map = L.map('map').setView([48.793, 2.396], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', { maxZoom: 20 }).addTo(map);
+        layerBesoinsEtabs = L.featureGroup().addTo(map);
+        layerFocusEtab = L.featureGroup().addTo(map);
+        layerFocusProfs = L.featureGroup().addTo(map);
+        layerItineraire = L.featureGroup().addTo(map);
+    }
+    setTimeout(() => map.invalidateSize(), 200);
+}
+
 function chargerBesoins() {
     fetch(`${API_URL}/besoins`).then(r => r.json()).then(besoins => {
         if (!Array.isArray(besoins)) return;
         besoinsData = besoins;
-        const tbody = document.getElementById('table-besoins-body');
-        tbody.innerHTML = "";
+        const container = document.getElementById('liste-besoins-cards');
+        container.innerHTML = "";
         let nbNouveaux = 0;
+
+        if (besoins.length === 0) {
+            container.innerHTML = `<p style="color:#666; font-size:13px; text-align:center; margin-top:30px;">🎉 Aucun besoin de remplacement en attente.</p>`;
+        }
 
         besoins.forEach(b => {
             if (!b.vu_rectorat) nbNouveaux++;
@@ -363,35 +380,86 @@ function chargerBesoins() {
             const estReconnue = (b.reconnue !== undefined) ? b.reconnue : (b.matiere_id != null);
 
             let matiereHtml = "";
-            let actionMatchingHtml = "";
+            let boutonAction = "";
 
             if (estReconnue) {
-                matiereHtml = `<span class="badge blue">✅ ${matOfficielle}</span> 
-                               <button class="btn-small btn-warning" title="Modifier la matière rattachée" onclick="ouvrirModalResoudreMatiere(${b.id}, '${esc(matDeclaree)}')">✏️</button>`;
-                actionMatchingHtml = `<button class="btn-small btn" onclick="lancerMatching(${b.id}, ${b.latitude}, ${b.longitude}, '${esc(b.nom_etablissement)}', '${esc(matOfficielle)}', ${b.heures})">🗺️ Trouver un remplaçant</button>`;
+                matiereHtml = `<span class="badge blue">✅ ${matOfficielle}</span>
+                               <button class="btn-small btn-warning" title="Modifier la matière" onclick="ouvrirModalResoudreMatiere(${b.id}, '${esc(matDeclaree)}')">✏️</button>`;
+                boutonAction = `<button class="btn-small btn" style="padding:6px 10px;" onclick="lancerMatching(${b.id}, ${b.latitude}, ${b.longitude}, '${esc(b.nom_etablissement)}', '${esc(matOfficielle)}', ${b.heures})">🔍 Afficher remplaçants & carte</button>`;
             } else {
                 matiereHtml = `<span class="badge orange">⚠️ Non reconnue : "${matDeclaree}"</span>`;
-                actionMatchingHtml = `<button class="btn-small btn-warning" onclick="ouvrirModalResoudreMatiere(${b.id}, '${esc(matDeclaree)}')">🔧 Qualifier / Créer la matière</button>`;
+                boutonAction = `<button class="btn-small btn-warning" style="padding:6px 10px;" onclick="ouvrirModalResoudreMatiere(${b.id}, '${esc(matDeclaree)}')">🔧 Qualifier la matière</button>`;
             }
 
-            tbody.innerHTML += `<tr class="${!b.vu_rectorat ? 'unseen-alert' : ''}">
-                <td>${!b.vu_rectorat ? '<span class="badge red">🔔 NOUVEAU</span>' : '<span class="badge">Vu</span>'}</td>
-                <td><strong>${b.nom_etablissement}</strong></td>
-                <td>${matiereHtml}</td>
-                <td>${b.motif || 'Absence'}</td>
-                <td>${b.date_debut} ➔ ${b.date_fin}</td>
-                <td><strong>${b.heures}h</strong></td>
-                <td>
-                    ${actionMatchingHtml}
-                    <button class="btn-small btn-danger" onclick="supprimerBesoin(${b.id})">🗑️</button>
-                </td>
-            </tr>`;
+            container.innerHTML += `<div class="besoin-card ${!b.vu_rectorat ? 'unseen' : ''}">
+                <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:6px;">
+                    <strong>🏫 ${b.nom_etablissement}</strong>
+                    ${!b.vu_rectorat ? '<span class="badge red">🔔 NOUVEAU</span>' : ''}
+                </div>
+                <div style="margin-bottom:6px;">
+                    ${matiereHtml} <span class="badge">⏱️ ${b.heures}h/sem</span>
+                </div>
+                <div style="font-size:12px; color:#555; margin-bottom:10px;">
+                    📅 ${b.date_debut} ➔ ${b.date_fin} &nbsp;|&nbsp; 💬 ${b.motif || 'Absence'}
+                </div>
+                <div style="display:flex; justify-content:space-between; align-items:center;">
+                    ${boutonAction}
+                    <button class="btn-small btn-danger" onclick="supprimerBesoin(${b.id})" title="Supprimer ce besoin">🗑️</button>
+                </div>
+            </div>`;
         });
 
         const badge = document.getElementById('alert-badge');
         if (nbNouveaux > 0) { badge.style.display = "inline-block"; badge.innerText = nbNouveaux; }
         else { badge.style.display = "none"; }
+
+        // Si on est sur la vue liste des besoins, on affiche sur la carte uniquement les écoles qui ont un besoin
+        if (document.getElementById('panel-liste-besoins').style.display !== 'none') {
+            afficherCarteBesoinsGenerale();
+        }
     });
+}
+
+// Affiche uniquement les établissements ayant un besoin actif (Vue 1)
+function afficherCarteBesoinsGenerale() {
+    if (!map || !layerBesoinsEtabs) return;
+    layerBesoinsEtabs.clearLayers();
+    layerFocusEtab.clearLayers();
+    layerFocusProfs.clearLayers();
+    layerItineraire.clearLayers();
+
+    const markers = [];
+    besoinsData.forEach(b => {
+        if (!b.latitude || !b.longitude) return;
+        const matOfficielle = b.matiere_officielle || b.matiere || b.matiere_declaree || "";
+        const estReconnue = (b.reconnue !== undefined) ? b.reconnue : (b.matiere_id != null);
+
+        const m = L.marker([b.latitude, b.longitude], {
+            icon: L.icon({
+                iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
+                shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+                iconSize: [25, 41], iconAnchor: [12, 41]
+            })
+        }).bindPopup(`<strong>${b.nom_etablissement}</strong><br>Besoin : ${matOfficielle} (${b.heures}h)`).addTo(layerBesoinsEtabs);
+
+        if (estReconnue) {
+            m.on('click', () => lancerMatching(b.id, b.latitude, b.longitude, b.nom_etablissement, matOfficielle, b.heures));
+        }
+        markers.push(m);
+    });
+
+    if (markers.length > 0) {
+        map.fitBounds(L.featureGroup(markers).getBounds(), { padding: [50, 50], maxZoom: 14 });
+    } else {
+        map.setView([48.793, 2.396], 13);
+    }
+}
+
+// Retour de la vue remplaçants vers la liste des besoins
+function retourListeBesoins() {
+    document.getElementById('panel-matching-profs').style.display = "none";
+    document.getElementById('panel-liste-besoins').style.display = "block";
+    afficherCarteBesoinsGenerale();
 }
 
 function ouvrirModalResoudreMatiere(besoin_id, matiereDeclaree) {
@@ -498,34 +566,23 @@ function chargerRemplacants() {
     fetch(`${API_URL}/remplacants`).then(r => r.json()).then(profs => {
         remplacantsData = profs;
         const tbody = document.getElementById('table-profs-body');
-        if (tbody) tbody.innerHTML = "";
-        if (layerProfs) layerProfs.clearLayers();
+        if (!tbody) return;
+        tbody.innerHTML = "";
 
         profs.forEach(p => {
             const matBadges = (p.matieres || []).map(m => `<span class="badge blue">${m}</span>`).join(" ");
-            if (tbody) {
-                tbody.innerHTML += `<tr>
-                    <td><strong>${p.nom}</strong><br><small>${p.telephone || ''} ${p.email || ''}</small></td>
-                    <td><span class="badge">${p.statut}</span></td>
-                    <td><strong>${p.concours}</strong><br>${matBadges}</td>
-                    <td>${p.adresse}</td>
-                    <td><span class="badge ${p.heures_restantes > 0 ? 'green' : 'red'}">${p.heures_restantes}h / ${p.heures_max}h</span></td>
-                    <td>
-                        <button class="btn-small btn" onclick="afficherFicheRemplacant(${p.id})">👁️</button>
-                        <button class="btn-small btn-warning" onclick="editerRemplacant(${p.id})">✏️</button>
-                        <button class="btn-small btn-danger" onclick="supprimerRemplacant(${p.id})">🗑️</button>
-                    </td>
-                </tr>`;
-            }
-            if (p.latitude && layerProfs) {
-                L.marker([p.latitude, p.longitude], {
-                    icon: L.icon({
-                        iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-${p.heures_restantes > 0 ? "green" : "grey"}.png`,
-                        shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
-                        iconSize: [25, 41], iconAnchor: [12, 41]
-                    })
-                }).bindPopup(`<strong>${p.nom} (${p.statut})</strong><br>${p.concours}<br>Dispo : ${p.heures_restantes}h`).addTo(layerProfs);
-            }
+            tbody.innerHTML += `<tr>
+                <td><strong>${p.nom}</strong><br><small>${p.telephone || ''} ${p.email || ''}</small></td>
+                <td><span class="badge">${p.statut}</span></td>
+                <td><strong>${p.concours}</strong><br>${matBadges}</td>
+                <td>${p.adresse}</td>
+                <td><span class="badge ${p.heures_restantes > 0 ? 'green' : 'red'}">${p.heures_restantes}h / ${p.heures_max}h</span></td>
+                <td>
+                    <button class="btn-small btn" onclick="afficherFicheRemplacant(${p.id})">👁️</button>
+                    <button class="btn-small btn-warning" onclick="editerRemplacant(${p.id})">✏️</button>
+                    <button class="btn-small btn-danger" onclick="supprimerRemplacant(${p.id})">🗑️</button>
+                </td>
+            </tr>`;
         });
     });
 }
@@ -654,49 +711,8 @@ function afficherFicheRemplacant(id) {
     });
 }
 
-// --- 5. CARTE, ITINÉRAIRES & MATCHING MULTIMODAL (ARRIVÉE 8H00) ---
-let layerItineraire = null;
-let candidatsMatchingActuels = [];
-let ecoleMatchingActuelle = null;
-
-function initMap() {
-    if (!map) {
-        map = L.map('map').setView([48.793, 2.396], 13);
-        L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', { maxZoom: 20 }).addTo(map);
-        layerPrimaire = L.featureGroup().addTo(map);
-        layerSecondaire = L.featureGroup().addTo(map);
-        layerProfs = L.featureGroup().addTo(map);
-        layerItineraire = L.featureGroup().addTo(map);
-        L.control.layers(null, {
-            "🏫 Écoles primaires": layerPrimaire,
-            "🎓 Collèges & Lycées": layerSecondaire,
-            "👨‍🏫 Remplaçants (TZR/Contractuels)": layerProfs,
-            "🛣️ Tracé de l'itinéraire": layerItineraire
-        }, { position: 'topright' }).addTo(map);
-        chargerCarteEtablissements();
-        chargerRemplacants();
-    }
-    setTimeout(() => map.invalidateSize(), 200);
-}
-
-function chargerCarteEtablissements() {
-    if (!layerPrimaire) return;
-    layerPrimaire.clearLayers();
-    layerSecondaire.clearLayers();
-    etablissementsData.forEach(etab => {
-        if (etab.degre === "Autre") return;
-        L.marker([etab.latitude, etab.longitude], {
-            icon: L.icon({
-                iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-${etab.degre === "Secondaire" ? "red" : "blue"}.png`,
-                shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
-                iconSize: [25, 41], iconAnchor: [12, 41]
-            })
-        }).bindPopup(`<strong>${etab.nom}</strong><br>UAI : ${etab.uai}`).addTo(etab.degre === "Secondaire" ? layerSecondaire : layerPrimaire);
-    });
-}
-
-// Interroge les serveurs OpenStreetMap (OSRM Allemagne) pour Voiture, Vélo et Marche
-async function calculerTempsOSRM( profil, lat1, lng1, lat2, lng2 ) {
+// --- 5. MATCHING CIBLÉ : AFFICHE UNIQUEMENT L'ÉCOLE ET LES REMPLAÇANTS COMPATIBLES ---
+async function calculerTempsOSRM(profil, lat1, lng1, lat2, lng2) {
     const serveur = profil === 'car' ? 'routed-car' : (profil === 'bike' ? 'routed-bike' : 'routed-foot');
     const url = `https://routing.openstreetmap.de/${serveur}/route/v1/driving/${lng1},${lat1};${lng2},${lat2}?overview=full&geometries=geojson`;
     try {
@@ -704,7 +720,6 @@ async function calculerTempsOSRM( profil, lat1, lng1, lat2, lng2 ) {
         const data = await r.json();
         if (data.routes && data.routes.length > 0) {
             let minutes = Math.round(data.routes[0].duration / 60);
-            // Majoration trafic 8h00 en semaine pour la voiture (+35% + 3 min de stationnement)
             if (profil === 'car') minutes = Math.round(minutes * 1.35) + 3;
             return { minutes: Math.max(1, minutes), geometry: data.routes[0].geometry };
         }
@@ -712,7 +727,6 @@ async function calculerTempsOSRM( profil, lat1, lng1, lat2, lng2 ) {
     return { minutes: null, geometry: null };
 }
 
-// Génère un lien Google Maps Transit calé sur le prochain jour ouvré à 08h00
 function genererLienGoogleTransit8h(lat1, lng1, lat2, lng2) {
     return `https://www.google.com/maps/dir/?api=1&origin=${lat1},${lng1}&destination=${lat2},${lng2}&travelmode=transit`;
 }
@@ -720,25 +734,61 @@ function genererLienGoogleTransit8h(lat1, lng1, lat2, lng2) {
 async function lancerMatching(besoin_id, lat, lng, nomEtab, matiere, heures) {
     besoinActifContext = besoin_id;
     ecoleMatchingActuelle = { lat, lng, nomEtab, matiere, heures };
-    switchTab('map');
-    if (layerItineraire) layerItineraire.clearLayers();
-    setTimeout(() => map.setView([lat, lng], 14), 250);
+
+    // Bascule la colonne de gauche vers la vue Remplaçants
+    document.getElementById('panel-liste-besoins').style.display = "none";
+    document.getElementById('panel-matching-profs').style.display = "block";
+
+    // Nettoie la carte pour n'afficher QUE l'établissement concerné et ses remplaçants
+    initMap();
+    layerBesoinsEtabs.clearLayers();
+    layerFocusEtab.clearLayers();
+    layerFocusProfs.clearLayers();
+    layerItineraire.clearLayers();
+
+    const markerEcole = L.marker([lat, lng], {
+        icon: L.icon({
+            iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-red.png',
+            shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+            iconSize: [25, 41], iconAnchor: [12, 41]
+        })
+    }).bindPopup(`<strong>🏫 ${nomEtab}</strong><br>Besoin : ${matiere} (${heures}h)`).addTo(layerFocusEtab);
+    markerEcole.openPopup();
+    map.setView([lat, lng], 14);
 
     const box = document.getElementById('search-results');
-    box.innerHTML = `<p>⏳ Recherche des enseignants et calcul des temps de trajet (arrivée 8h00)...</p>`;
+    box.innerHTML = `<p>⏳ Recherche des enseignants disponibles et calcul des temps de trajet (arrivée 8h00)...</p>`;
 
     const profs = await fetch(`${API_URL}/match?besoin_id=${besoin_id}`).then(r => r.json());
-    candidatsMatchingActuels = profs;
+    candidatsMatchingActuels = Array.isArray(profs) ? profs : [];
 
-    if (profs.length === 0) {
+    if (candidatsMatchingActuels.length === 0) {
         box.innerHTML = `<div style="background:#f0f4f8; padding:12px; border-radius:6px; border-left:4px solid var(--primary); margin-bottom:15px;">
-            <strong>${nomEtab}</strong><br>Matière : <span class="badge blue">${matiere}</span> (<b>${heures}h</b>)
+            <strong>🏫 ${nomEtab}</strong><br>Matière : <span class="badge blue">${matiere}</span> (<b>${heures}h</b>)
         </div>
         <p style="color:var(--danger); font-weight:bold;">Aucun remplaçant disponible habilité pour cette matière avec ${heures}h libres.</p>`;
         return;
     }
 
-    // Calcul en parallèle des itinéraires Voiture, Vélo et Marche pour chaque candidat
+    // Place uniquement les marqueurs des remplaçants compatibles sur la carte
+    const tousLesMarqueurs = [markerEcole];
+    candidatsMatchingActuels.forEach(p => {
+        if (p.latitude && p.longitude) {
+            const mp = L.marker([p.latitude, p.longitude], {
+                icon: L.icon({
+                    iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-green.png',
+                    shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png',
+                    iconSize: [25, 41], iconAnchor: [12, 41]
+                })
+            }).bindPopup(`<strong>👨‍🏫 ${p.nom} (${p.statut})</strong><br>${p.concours}<br>Départ : ${p.adresse}<br>Dispo : ${p.heures_restantes}h`).addTo(layerFocusProfs);
+            tousLesMarqueurs.push(mp);
+        }
+    });
+
+    // Ajuste automatiquement le zoom pour englober le collège et les remplaçants
+    map.fitBounds(L.featureGroup(tousLesMarqueurs).getBounds(), { padding: [50, 50], maxZoom: 14 });
+
+    // Calcul des temps de parcours Voiture / Vélo / Marche
     await Promise.all(candidatsMatchingActuels.map(async (p) => {
         const [car, bike, foot] = await Promise.all([
             calculerTempsOSRM('car', p.latitude, p.longitude, lat, lng),
@@ -749,7 +799,6 @@ async function lancerMatching(besoin_id, lat, lng, nomEtab, matiere, heures) {
         p.bike_min = bike.minutes; p.bike_geom = bike.geometry;
         p.foot_min = foot.minutes; p.foot_geom = foot.geometry;
 
-        // Si pas de clé Navitia configurée, estimation TC urbaine (attentes + correspondances comprises)
         if (p.tc_minutes === null || p.tc_minutes === undefined) {
             p.tc_estime = Math.round(8 + (p.distance_km * 3.8));
         } else {
@@ -773,7 +822,7 @@ function afficherCandidatsTries(critereTri) {
     });
 
     let html = `<div style="background:#f0f4f8; padding:12px; border-radius:6px; border-left:4px solid var(--primary); margin-bottom:12px;">
-        <strong>${nomEtab}</strong><br>
+        <strong>🏫 ${nomEtab}</strong><br>
         Matière : <span class="badge blue">${matiere}</span> (<b>${heures}h</b>)
     </div>
     <div class="form-group" style="margin-bottom:15px;">
@@ -786,7 +835,7 @@ function afficherCandidatsTries(critereTri) {
             <option value="foot" ${critereTri==='foot'?'selected':''}>🚶 À pied</option>
         </select>
     </div>
-    <p style="font-size:11px; color:#666; margin-top:-8px;">💡 Cliquez sur 🚗, 🚲 ou 🚶 pour tracer la route sur la carte.</p>`;
+    <p style="font-size:11px; color:#666; margin-top:-8px;">💡 Cliquez sur 🚗, 🚲 ou 🚶 pour tracer l'itinéraire sur la carte.</p>`;
 
     liste.forEach((p, idx) => {
         const lienTC = genererLienGoogleTransit8h(p.latitude, p.longitude, lat, lng);
@@ -802,7 +851,6 @@ function afficherCandidatsTries(critereTri) {
             <small>${p.statut} — ${p.concours}</small><br>
             <small>Départ (${p.statut === 'TZR' ? 'RAD' : 'Domicile'}) : <b>${p.adresse}</b></small>
 
-            <!-- Grille des temps de trajet -->
             <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:4px; margin:8px 0; text-align:center;">
                 <button class="badge" style="border:1px solid #ccc; cursor:pointer; background:#fff;" onclick="tracerItineraire(${p.id}, 'car')" title="Tracer le trajet voiture">
                     🚗 ${p.car_min ? p.car_min + ' min' : '-'}
@@ -817,7 +865,7 @@ function afficherCandidatsTries(critereTri) {
 
             <div style="display:flex; justify-content:space-between; align-items:center; background:#eef5ff; padding:6px 8px; border-radius:4px; font-size:12px; margin-bottom:8px;">
                 <span>${labelTC}</span>
-                <a href="${lienTC}" target="_blank" style="color:var(--primary); font-weight:bold; text-decoration:none;">Voir horaires 8h ↗</a>
+                <a href="${lienTC}" target="_blank" style="color:var(--primary); font-weight:bold; text-decoration:none;">Horaires 8h ↗</a>
             </div>
 
             <div style="display:flex; justify-content:space-between; align-items:center;">
@@ -847,6 +895,20 @@ function tracerItineraire(profId, mode) {
         ligne.openPopup();
         map.fitBounds(ligne.getBounds(), { padding: [40, 40] });
     }
+}
+
+function validerAffectation(remplacant_id) {
+    fetch(`${API_URL}/affecter`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ remplacant_id, besoin_id: besoinActifContext })
+    }).then(() => {
+        alert("✅ Affectation enregistrée avec succès !");
+        retourListeBesoins();
+        chargerBesoins();
+        chargerAffectations();
+        chargerRemplacants();
+        chargerEtablissements();
+    });
 }
 
 // --- 6. HISTORIQUE DES AFFECTATIONS ---
