@@ -724,11 +724,10 @@ async function calculerTempsOSRM(profil, lat1, lng1, lat2, lng2) {
     return { minutes: null, geometry: null };
 }
 
-function genererLienGoogleTransit8h(lat1, lng1, lat2, lng2, timestamp8h) {
-    if (timestamp8h) {
-        return `https://www.google.com/maps/dir/${lat1},${lng1}/${lat2},${lng2}/data=!4m6!4m5!2m3!6e1!7e2!8j${timestamp8h}!3e3`;
-    }
-    return `https://www.google.com/maps/dir/?api=1&origin=${lat1},${lng1}&destination=${lat2},${lng2}&travelmode=transit`;
+function genererLienGoogleTransit8h(lat1, lng1, lat2, lng2) {
+    // Format direct : mode transport public (transit), avec heure d'arrivée fixée à 08:00
+    // Google Maps gère automatiquement la date du prochain jour ouvré par défaut si on ne lui passe pas de date aberrante
+    return `https://www.google.com/maps/dir/?api=1&origin=${lat1},${lng1}&destination=${lat2},${lng2}&travelmode=transit&arrival_time=08:00`;
 }
 
 async function lancerMatching(besoin_id, lat, lng, nomEtab, matiere, heures) {
@@ -836,7 +835,7 @@ function afficherCandidatsTries(critereTri) {
     <p style="font-size:11px; color:#666; margin-top:-8px;">💡 Cliquez sur 🚗, 🚲 ou 🚶 pour tracer l'itinéraire sur la carte.</p>`;
 
     liste.forEach((p, idx) => {
-        const lienTC = genererLienGoogleTransit8h(p.latitude, p.longitude, lat, lng, p.tc_timestamp_8h);
+        const lienTC = genererLienGoogleTransit8h(p.latitude, p.longitude, lat, lng);
         const labelTC = p.tc_minutes !== null && p.tc_minutes !== undefined
             ? `🚇 <b>${p.tc_minutes} min</b> <small>(${p.tc_lignes})</small>`
             : `🚇 ~<b>${p.tc_estime} min</b> <small>(Estimé)</small>`;
