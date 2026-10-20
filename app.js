@@ -727,10 +727,42 @@ async function calculerTempsOSRM(profil, lat1, lng1, lat2, lng2) {
     return { minutes: null, geometry: null };
 }
 
-function genererLienGoogleTransit8h(lat1, lng1, lat2, lng2, timestamp8h) {
-    // Si le serveur fournit le timestamp exact du jour d'école à 8h, on l'utilise, sinon secours sur l'heure actuelle
-    const ts = timestamp8h || Math.floor(Date.now() / 1000);
-    // Format de l'URL Google Maps supportant nativement l'heure d'arrivée cible en transport
+function getProchainTimestampScolaire8h() {
+    let now = new Date();
+    let month = now.getMonth(); // 0 = Janvier, 6 = Juillet, 7 = Août, 8 = Septembre...
+    let year = now.getFullYear();
+
+    // Si on est en juillet ou août (grandes vacances d'été), on prend le 2ème mardi de septembre comme référence stable
+    if (month === 6 || month === 7) {
+        let sep1 = new Date(year, 8, 1); // 1er septembre
+        let daySep1 = sep1.getDay(); // 0=Dimanche, 1=Lundi, 2=Mardi...
+        let daysToFirstTue = (2 - daySep1 + 7) % 7;
+        let secondTueDate = 1 + daysToFirstTue + 7; // 2ème mardi de septembre
+        let target = new Date(year, 8, secondTueDate, 8, 0, 0);
+        return Math.floor(target.getTime() / 1000);
+    }
+
+    // Pendant l'année scolaire, on cherche le prochain Mardi (2) ou Jeudi (4) dans les 7 prochains jours
+    for (let i = 1; i <= 7; i++) {
+        let test = new Date();
+        test.setDate(now.getDate() + i);
+        let jour = test.getDay();
+        if (jour === 2 || jour === 4) {
+            test.setHours(8, 0, 0, 0);
+            return Math.floor(test.getTime() / 1000);
+        }
+    }
+
+    // Secours par défaut sur demain 8h
+    let demain = new Date();
+    demain.setDate(demain.getDate() + 1);
+    demain.setHours(8, 0, 0, 0);
+    return Math.floor(demain.getTime() / 1000);
+}
+
+function genererLienGoogleTransit8h(lat1, lng1, lat2, lng2) {
+    const ts = getProchainTimestampScolaire8h();
+    // Transmet le timestamp précis d'un mardi/jeudi à 8h à Google Maps via arrival_time
     return `https://www.google.com/maps/dir/?api=1&origin=${lat1},${lng1}&destination=${lat2},${lng2}&travelmode=transit&arrival_time=${ts}`;
 }
 
