@@ -728,10 +728,10 @@ async function calculerTempsOSRM(profil, lat1, lng1, lat2, lng2) {
 }
 
 function genererLienGoogleTransit8h(lat1, lng1, lat2, lng2, timestamp8h) {
-    // Si le serveur a fourni un timestamp de référence à 8h, on l'utilise, sinon on prend l'heure actuelle
+    // Si le serveur fournit le timestamp exact du jour d'école à 8h, on l'utilise, sinon secours sur l'heure actuelle
     const ts = timestamp8h || Math.floor(Date.now() / 1000);
-    // Le paramètre !8j transmet le timestamp en secondes et !3e3 force le mode Transports en commun
-    return `https://www.google.com/maps/dir/${lat1},${lng1}/${lat2},${lng2}/data=!4m6!4m5!2m3!6e1!7e2!8j${ts}!3e3`;
+    // Format de l'URL Google Maps supportant nativement l'heure d'arrivée cible en transport
+    return `https://www.google.com/maps/dir/?api=1&origin=${lat1},${lng1}&destination=${lat2},${lng2}&travelmode=transit&arrival_time=${ts}`;
 }
 
 async function lancerMatching(besoin_id, lat, lng, nomEtab, matiere, heures) {
