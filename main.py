@@ -590,7 +590,7 @@ def supprimer_remplacant(remp_id: int):
     conn.close()
     return {"status": "deleted"}
 
-# --- 5. MATCHING SPATIAL & CALENDRIER SCOLAIRE DYNAMIQUE MULTI-ZONES ---
+# --- 5. MATCHING SPATIAL & CALENDRIER SCOLAIRE DYNAMIQUE MULTI-ZONES (SANS DÉPENDANCE PAYANTE) ---
 DEPT_VERS_ZONE = {
     "001": "Zone A", "003": "Zone A", "007": "Zone A", "015": "Zone A", "016": "Zone A",
     "017": "Zone A", "019": "Zone A", "021": "Zone A", "023": "Zone A", "024": "Zone A",
@@ -725,25 +725,19 @@ def trouver_jour_scolaire_8h(uai: str):
     label_fr = f"{jours_fr[cible.weekday()]} {cible.strftime('%d/%m/%Y')} à 08h00 ({zone_scolaire})"
     return cible.strftime("%Y%m%dT080000"), int(cible.timestamp()), label_fr, est_idf
 
-def calculer_tc_multiregion(lat_dep, lng_dep, lat_arr, lng_arr, dt_navitia, est_idf):
-    if lat_dep is None or lng_dep is None or lat_arr is None or lng_arr is None:
+def calculer_tc_idfm(lat_dep, lng_dep, lat_arr, lng_arr, dt_navitia, est_idf):
+    # En dehors de l'Île-de-France, l'API gratuite IDFM n'est pas disponible ; on renvoie None pour basculer sur l'estimation + Google Maps universel
+    if not est_idf:
         return None, None
 
     prim_token = os.getenv("PRIM_API_TOKEN")
-    navitia_token = os.getenv("NAVITIA_TOKEN")
+    if not prim_token:
+        return None, None
 
     try:
-        if est_idf and prim_token:
-            url = f"https://prim.iledefrance-mobilites.fr/marketplace/v2/navitia/journeys?from={lng_dep};{lat_dep}&to={lng_arr};{lat_arr}&datetime={dt_navitia}&datetime_represents=arrival&count=1"
-            req = urllib.request.Request(url)
-            req.add_header("apikey", prim_token.strip())
-        elif navitia_token:
-            url = f"https://api.navitia.io/v1/journeys?from={lng_dep};{lat_dep}&to={lng_arr};{lat_arr}&datetime={dt_navitia}&datetime_represents=arrival&count=1"
-            req = urllib.request.Request(url)
-            auth = base64.b64encode(f"{navitia_token.strip()}:".encode()).decode()
-            req.add_header("Authorization", f"Basic {auth}")
-        else:
-            return None, None
+        url = f"https://prim.iledefrance-mobilites.fr/marketplace/v2/navitia/journeys?from={lng_dep};{lat_dep}&to={lng_arr};{lat_arr}&datetime={dt_navitia}&datetime_represents=arrival&count=1"
+        req = urllib.request.Request(url)
+        req.add_header("apikey", prim_token.strip())
 
         with urllib.request.urlopen(req, timeout=5) as resp:
             data = json.loads(resp.read().decode())
@@ -758,7 +752,7 @@ def calculer_tc_multiregion(lat_dep, lng_dep, lat_arr, lng_arr, dt_navitia, est_
                 resume_lignes = " ➔ ".join(lignes) if lignes else "Marche directe"
                 return duree_min, resume_lignes
     except Exception as e:
-        print("Erreur API TC :", e)
+        print("Erreur API TC IDFM :", e)
     return None, None
 
 @app.get("/api/match")
@@ -797,7 +791,7 @@ def match_remplacants(besoin_id: int):
 
     res = []
     for r in rows:
-        tc_min, tc_lignes = calculer_tc_multiregion(r[8], r[9], r[11], r[12], dt_navitia, est_idf)
+        tc_min, tc_lignes = calculer_tc_idfm(r[8], r[9], r[11], r[12], dt_navitia, est_idf)
         res.append({
             "id": r[0], "nom": r[1], "statut": r[2], "concours": r[3], "adresse": r[4],
             "heures_restantes": r[5], "telephone": r[6], "email": r[7],
