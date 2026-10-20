@@ -13,6 +13,11 @@ let autocompleteTimeout = null;
 
 let map, layerPrimaire, layerSecondaire, layerProfs;
 
+// Sécurise les apostrophes et valeurs nulles dans les attributs onclick
+function esc(str) {
+    return String(str || '').replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+
 function initApp() {
     chargerReferentiel();
     chargerEtablissements();
@@ -180,7 +185,7 @@ function chargerDonneesEcoleConnectee() {
             tbMat.innerHTML += `<tr>
                 <td><strong>${m.nom}</strong></td>
                 <td>
-                    <button class="btn-small btn-warning" onclick="ecoleRenommerMatiere(${m.id}, '${m.nom.replace(/'/g, "\\'")}')">✏️</button>
+                    <button class="btn-small btn-warning" onclick="ecoleRenommerMatiere(${m.id}, '${esc(m.nom)}')">✏️</button>
                     <button class="btn-small btn-danger" onclick="ecoleSupprimerMatiere(${m.id})">🗑️</button>
                 </td>
             </tr>`;
@@ -195,21 +200,23 @@ function chargerDonneesEcoleConnectee() {
         const tbody = document.getElementById('ecole-table-postes');
         const selPoste = document.getElementById('ecole-besoin-poste');
         tbody.innerHTML = "";
-        selPoste.innerHTML = "";
+        selPoste.innerHTML = `<option value="">-- Choisir un poste ou saisir la matière ci-dessous --</option>`;
 
         postes.forEach(p => {
             tbody.innerHTML += `<tr>
                 <td><span class="badge blue">${p.matiere_ecole}</span></td>
-                <td><strong>${p.nom}</strong></td>
                 <td><strong>${p.heures_poste}h</strong></td>
                 <td><button class="btn-small btn-danger" onclick="ecoleSupprimerPoste(${p.id})">🗑️</button></td>
             </tr>`;
-            selPoste.appendChild(new Option(`${p.matiere_ecole} — ${p.heures_poste}h (${p.nom})`, p.id));
+            selPoste.appendChild(new Option(`${p.matiere_ecole} (${p.heures_poste}h)`, p.id));
         });
-        autoRemplirDepuisPosteEcole();
+        if (postes.length > 0) {
+            selPoste.value = postes[0].id;
+            autoRemplirDepuisPosteEcole();
+        }
     });
 
-    // 3. Suivi des demandes et affectations de l'école
+    // 3. Suivi des demandes et affectations de l'école (sans colonne Poste concerné)
     Promise.all([
         fetch(`${API_URL}/besoins`).then(r => r.json()),
         fetch(`${API_URL}/affectations`).then(r => r.json())
@@ -217,20 +224,21 @@ function chargerDonneesEcoleConnectee() {
         const tbody = document.getElementById('ecole-table-suivi');
         tbody.innerHTML = "";
         besoins.filter(b => b.uai === ecoleConnectee.uai).forEach(b => {
+            const matAffichee = b.matiere || b.matiere_declaree || '-';
             tbody.innerHTML += `<tr>
-                <td><strong>${b.poste_nom}</strong> <small>(${b.motif})</small></td>
-                <td>${b.matiere} ${!b.reconnue ? '<span class="badge orange">En cours de qualification Rectorat</span>' : ''}</td>
+                <td><strong>${matAffichee}</strong> ${b.reconnue === false ? '<span class="badge orange">Qualification Rectorat en cours</span>' : ''}</td>
+                <td>${b.motif || 'Absence'}</td>
                 <td>${b.date_debut} ➔ ${b.date_fin}</td>
-                <td>${b.heures}h</td>
+                <td><strong>${b.heures}h</strong></td>
                 <td><span class="badge red">⏳ En attente Rectorat</span></td>
             </tr>`;
         });
         affectations.filter(a => a.uai === ecoleConnectee.uai).forEach(a => {
             tbody.innerHTML += `<tr>
-                <td><strong>${a.poste_couvert}</strong></td>
-                <td>${a.discipline}</td>
+                <td><strong>${a.discipline}</strong></td>
+                <td>Remplacement affecté</td>
                 <td>${a.date_debut} ➔ ${a.date_fin}</td>
-                <td>${a.heures}h</td>
+                <td><strong>${a.heures}h</strong></td>
                 <td><span class="badge green">✅ Couvert par ${a.nom_prof}</span></td>
             </tr>`;
         });
@@ -274,14 +282,12 @@ function autoRemplirDepuisPosteEcole() {
 
 function ecoleAjouterPoste() {
     const data = {
-        nom: document.getElementById('pe-nom').value,
         matiere_ecole: document.getElementById('pe-matiere').value,
         heures_poste: parseFloat(document.getElementById('pe-heures').value)
     };
     fetch(`${API_URL}/ecoles/${ecoleConnectee.uai}/professeurs`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data)
     }).then(() => {
-        document.getElementById('pe-nom').value = "";
         fermerModal('modal-add-poste-ecole');
         chargerDonneesEcoleConnectee();
     });
@@ -305,9 +311,9 @@ function ecoleSupprimerPoste(id) {
 }
 
 function ecoleDeclarerBesoin() {
-    const prof_absent_id = parseInt(document.getElementById('ecole-besoin-poste').value);
+    const valPoste = document.getElementById('ecole-besoin-poste').value;
+    const prof_absent_id = valPoste ? parseInt(valPoste) : null;
     const matiere_declaree = document.getElementById('ecole-besoin-matiere').value.trim();
-    if (!prof_absent_id) return alert("Créez et sélectionnez d'abord le poste concerné.");
     if (!matiere_declaree) return alert("Veuillez indiquer la matière à assurer.");
 
     const data = {
@@ -321,10 +327,13 @@ function ecoleDeclarerBesoin() {
     };
     fetch(`${API_URL}/besoins`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data)
+    }).then(r => {
+        if (!r.ok) throw new Error("Erreur lors de l'enregistrement du besoin.");
+        return r.json();
     }).then(() => {
         alert("Alerte transmise au Rectorat !");
         chargerDonneesEcoleConnectee();
-    });
+    }).catch(err => alert(err.message));
 }
 
 // --- 3. ESPACE RECTORAT : BESOINS, DÉTECTION & QUALIFICATION DE MATIÈRE ---
@@ -340,6 +349,7 @@ function loginRectorat() {
 
 function chargerBesoins() {
     fetch(`${API_URL}/besoins`).then(r => r.json()).then(besoins => {
+        if (!Array.isArray(besoins)) return;
         besoinsData = besoins;
         const tbody = document.getElementById('table-besoins-body');
         tbody.innerHTML = "";
@@ -348,23 +358,27 @@ function chargerBesoins() {
         besoins.forEach(b => {
             if (!b.vu_rectorat) nbNouveaux++;
             
+            const matOfficielle = b.matiere_officielle || b.matiere || "";
+            const matDeclaree = b.matiere_declaree || b.matiere || "";
+            const estReconnue = (b.reconnue !== undefined) ? b.reconnue : (b.matiere_id != null);
+
             let matiereHtml = "";
             let actionMatchingHtml = "";
 
-            if (b.reconnue) {
-                matiereHtml = `<span class="badge blue">✅ ${b.matiere_officielle}</span> 
-                               <button class="btn-small btn-warning" title="Modifier la matière rattachée" onclick="ouvrirModalResoudreMatiere(${b.id}, '${b.matiere_declaree.replace(/'/g, "\\'")}')">✏️</button>`;
-                actionMatchingHtml = `<button class="btn-small btn" onclick="lancerMatching(${b.id}, ${b.latitude}, ${b.longitude}, '${b.nom_etablissement.replace(/'/g, "\\'")}', '${b.matiere_officielle.replace(/'/g, "\\'")}', ${b.heures}, '${b.poste_nom.replace(/'/g, "\\'")}')">🗺️ Trouver un remplaçant</button>`;
+            if (estReconnue) {
+                matiereHtml = `<span class="badge blue">✅ ${matOfficielle}</span> 
+                               <button class="btn-small btn-warning" title="Modifier la matière rattachée" onclick="ouvrirModalResoudreMatiere(${b.id}, '${esc(matDeclaree)}')">✏️</button>`;
+                actionMatchingHtml = `<button class="btn-small btn" onclick="lancerMatching(${b.id}, ${b.latitude}, ${b.longitude}, '${esc(b.nom_etablissement)}', '${esc(matOfficielle)}', ${b.heures})">🗺️ Trouver un remplaçant</button>`;
             } else {
-                matiereHtml = `<span class="badge orange">⚠️ Non reconnue : "${b.matiere_declaree}"</span>`;
-                actionMatchingHtml = `<button class="btn-small btn-warning" onclick="ouvrirModalResoudreMatiere(${b.id}, '${b.matiere_declaree.replace(/'/g, "\\'")}')">🔧 Qualifier / Créer la matière</button>`;
+                matiereHtml = `<span class="badge orange">⚠️ Non reconnue : "${matDeclaree}"</span>`;
+                actionMatchingHtml = `<button class="btn-small btn-warning" onclick="ouvrirModalResoudreMatiere(${b.id}, '${esc(matDeclaree)}')">🔧 Qualifier / Créer la matière</button>`;
             }
 
             tbody.innerHTML += `<tr class="${!b.vu_rectorat ? 'unseen-alert' : ''}">
                 <td>${!b.vu_rectorat ? '<span class="badge red">🔔 NOUVEAU</span>' : '<span class="badge">Vu</span>'}</td>
                 <td><strong>${b.nom_etablissement}</strong></td>
-                <td><strong>${b.poste_nom}</strong><br><small style="color:#666;">${b.motif}</small></td>
                 <td>${matiereHtml}</td>
+                <td>${b.motif || 'Absence'}</td>
                 <td>${b.date_debut} ➔ ${b.date_fin}</td>
                 <td><strong>${b.heures}h</strong></td>
                 <td>
@@ -439,13 +453,15 @@ function afficherTableEtabs(liste) {
     if (!tbody) return;
     tbody.innerHTML = "";
     liste.forEach(e => {
+        const nbPostes = e.nb_postes !== undefined ? e.nb_postes : (e.nb_profs || 0);
+        const totHeures = e.total_heures !== undefined ? `${e.total_heures}h` : '';
         tbody.innerHTML += `<tr>
             <td><code>${e.uai}</code></td>
             <td><strong>${e.nom}</strong></td>
             <td><span class="badge">${e.type}</span></td>
-            <td><span class="badge blue">${e.nb_postes} poste(s) — ${e.total_heures}h</span></td>
+            <td><span class="badge blue">${nbPostes} poste(s) ${totHeures ? '— ' + totHeures : ''}</span></td>
             <td>${e.nb_besoins > 0 ? `<span class="badge red">${e.nb_besoins} besoin(s)</span>` : '<span class="badge green">0</span>'}</td>
-            <td><button class="btn-small btn" onclick="ouvrirFicheEtab('${e.uai}')">👁️ Voir les postes</button></td>
+            <td><button class="btn-small btn" onclick="ouvrirFicheEtab('${esc(e.uai)}')">👁️ Voir les postes</button></td>
         </tr>`;
     });
 }
@@ -458,19 +474,21 @@ function filtrerTableEtabs(val) {
 function ouvrirFicheEtab(uai) {
     const e = etablissementsData.find(x => x.uai === uai);
     if (!e) return;
+    const nbPostes = e.nb_postes !== undefined ? e.nb_postes : (e.nb_profs || 0);
+    const totHeures = e.total_heures !== undefined ? `${e.total_heures}h` : '';
     document.getElementById('fe-nom').innerText = e.nom;
-    document.getElementById('fe-meta').innerText = `UAI : ${e.uai} | Catégorie : ${e.type} (${e.degre}) | Dotation déclarée : ${e.nb_postes} poste(s) (${e.total_heures}h)`;
+    document.getElementById('fe-meta').innerText = `UAI : ${e.uai} | Catégorie : ${e.type} (${e.degre}) | Dotation : ${nbPostes} poste(s) ${totHeures}`;
 
     fetch(`${API_URL}/ecoles/${uai}/professeurs`).then(r => r.json()).then(postes => {
         const tb = document.getElementById('fe-postes');
-        tb.innerHTML = postes.length ? "" : "<tr><td colspan='3'>Aucun poste renseigné</td></tr>";
-        postes.forEach(p => tb.innerHTML += `<tr><td><span class="badge blue">${p.matiere_ecole}</span></td><td><strong>${p.nom}</strong></td><td>${p.heures_poste}h</td></tr>`);
+        tb.innerHTML = postes.length ? "" : "<tr><td colspan='2'>Aucun poste renseigné</td></tr>";
+        postes.forEach(p => tb.innerHTML += `<tr><td><span class="badge blue">${p.matiere_ecole}</span></td><td><strong>${p.heures_poste}h</strong></td></tr>`);
     });
 
     const tbBesoins = document.getElementById('fe-besoins');
     const bEtab = besoinsData.filter(b => b.uai === uai);
     tbBesoins.innerHTML = bEtab.length ? "" : "<tr><td colspan='4'>Aucun besoin en attente</td></tr>";
-    bEtab.forEach(b => tbBesoins.innerHTML += `<tr><td><strong>${b.poste_nom}</strong> (${b.motif})</td><td>${b.matiere}</td><td>${b.date_debut} ➔ ${b.date_fin}</td><td>${b.heures}h</td></tr>`);
+    bEtab.forEach(b => tbBesoins.innerHTML += `<tr><td><strong>${b.matiere || b.matiere_declaree}</strong></td><td>${b.motif || 'Absence'}</td><td>${b.date_debut} ➔ ${b.date_fin}</td><td><strong>${b.heures}h</strong></td></tr>`);
 
     ouvrirModal('modal-fiche-etab');
 }
@@ -484,7 +502,7 @@ function chargerRemplacants() {
         if (layerProfs) layerProfs.clearLayers();
 
         profs.forEach(p => {
-            const matBadges = p.matieres.map(m => `<span class="badge blue">${m}</span>`).join(" ");
+            const matBadges = (p.matieres || []).map(m => `<span class="badge blue">${m}</span>`).join(" ");
             if (tbody) {
                 tbody.innerHTML += `<tr>
                     <td><strong>${p.nom}</strong><br><small>${p.telephone || ''} ${p.email || ''}</small></td>
@@ -626,12 +644,12 @@ function afficherFicheRemplacant(id) {
     document.getElementById('fr-email').innerText = p.email || '-';
     document.getElementById('fr-tel').innerText = p.telephone || '-';
     document.getElementById('fr-adresse').innerText = p.adresse;
-    document.getElementById('fr-matieres').innerHTML = p.matieres.map(m => `<span class="badge blue">${m}</span>`).join(" ");
+    document.getElementById('fr-matieres').innerHTML = (p.matieres || []).map(m => `<span class="badge blue">${m}</span>`).join(" ");
 
     fetch(`${API_URL}/remplacants/${id}/historique`).then(r => r.json()).then(hist => {
         const tb = document.getElementById('fr-historique');
-        tb.innerHTML = hist.length ? "" : "<tr><td colspan='5'>Aucune affectation</td></tr>";
-        hist.forEach(h => tb.innerHTML += `<tr><td>${h.date_debut} ➔ ${h.date_fin}</td><td><strong>${h.etablissement}</strong></td><td>${h.poste_couvert}</td><td>${h.discipline}</td><td>${h.heures}h</td></tr>`);
+        tb.innerHTML = hist.length ? "" : "<tr><td colspan='4'>Aucune affectation</td></tr>";
+        hist.forEach(h => tb.innerHTML += `<tr><td>${h.date_debut} ➔ ${h.date_fin}</td><td><strong>${h.etablissement}</strong></td><td><span class="badge blue">${h.discipline}</span></td><td><strong>${h.heures}h</strong></td></tr>`);
         ouvrirModal('modal-fiche-remp');
     });
 }
@@ -671,7 +689,7 @@ function chargerCarteEtablissements() {
     });
 }
 
-function lancerMatching(besoin_id, lat, lng, nomEtab, matiere, heures, posteNom) {
+function lancerMatching(besoin_id, lat, lng, nomEtab, matiere, heures) {
     besoinActifContext = besoin_id;
     switchTab('map');
     setTimeout(() => map.setView([lat, lng], 14), 250);
@@ -680,8 +698,7 @@ function lancerMatching(besoin_id, lat, lng, nomEtab, matiere, heures, posteNom)
         const box = document.getElementById('search-results');
         let html = `<div style="background:#f0f4f8; padding:12px; border-radius:6px; border-left:4px solid var(--primary); margin-bottom:15px;">
             <strong>${nomEtab}</strong><br>
-            Poste à couvrir : <b>${posteNom}</b><br>
-            Matière officielle : <span class="badge blue">${matiere}</span> (<b>${heures}h</b>)
+            Matière : <span class="badge blue">${matiere}</span> (<b>${heures}h</b>)
         </div>`;
 
         if (profs.length === 0) {
@@ -729,12 +746,11 @@ function chargerAffectations() {
             tbody.innerHTML += `<tr>
                 <td><strong>${a.nom_prof}</strong></td>
                 <td>${a.nom_etablissement}</td>
-                <td>${a.poste_couvert}</td>
                 <td><span class="badge blue">${a.discipline}</span></td>
                 <td>${a.date_debut} ➔ ${a.date_fin}</td>
                 <td><strong>${a.heures}h</strong></td>
                 <td>
-                    <button class="btn-small btn-warning" onclick="ouvrirEditAff(${a.id}, '${a.nom_prof.replace(/'/g, "\\'")}', ${a.heures}, '${a.date_debut}', '${a.date_fin}')">✏️</button>
+                    <button class="btn-small btn-warning" onclick="ouvrirEditAff(${a.id}, '${esc(a.nom_prof)}', ${a.heures}, '${a.date_debut}', '${a.date_fin}')">✏️</button>
                     <button class="btn-small btn-danger" onclick="supprimerAffectation(${a.id})">🗑️</button>
                 </td>
             </tr>`;
