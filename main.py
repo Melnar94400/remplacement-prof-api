@@ -18,6 +18,7 @@ def get_db_connection():
         database="postgres",
         user="postgres.scacemkfeugwaugxprhh",
         password=os.getenv("SUPABASE_PASSWORD")
+        sslmode="require"  # <--- AJOUTEZ CETTE LIGNE (avec la virgule au-dessus)
     )
 
 MAPPING_DISCIPLINES = {
