@@ -1,16 +1,16 @@
 import os
 import csv
 import io
+import json
+import base64
+import urllib.request
+from datetime import datetime, timedelta
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import Optional, List
 import psycopg2
 from dotenv import load_dotenv
-import urllib.request
-import json
-import base64
-from datetime import datetime, timedelta
 
 load_dotenv()
 
@@ -109,7 +109,7 @@ class BesoinCreate(BaseModel):
     motif: Optional[str] = "Congé maladie"
 
 class ResoudreMatiereRequest(BaseModel):
-    mode: str  # "associer" ou "creer"
+    mode: str
     matiere_id: Optional[int] = None
     corriger_ecole: Optional[bool] = True
     nouveau_nom: Optional[str] = ""
@@ -587,9 +587,10 @@ def supprimer_remplacant(remp_id: int):
     cur.close()
     conn.close()
     return {"status": "deleted"}
+
+# --- 5. MATCHING SPATIAL, POLYVALENCE & HORAIRES TC (PRIM IDFM) ---
 def prochain_jour_ouvre_8h():
     now = datetime.now()
-    # Si on est vendredi soir, samedi ou dimanche, on vise le lundi suivant
     jours_ajout = 1
     while (now + timedelta(days=jours_ajout)).weekday() >= 5:
         jours_ajout += 1
@@ -597,16 +598,28 @@ def prochain_jour_ouvre_8h():
     return cible.strftime("%Y%m%dT080000")
 
 def calculer_tc_idfm(lat_dep, lng_dep, lat_arr, lng_arr):
-    token = os.getenv("PRIM_API_TOKEN") or os.getenv("NAVITIA_TOKEN")
-    if not token:
+    if lat_dep is None or lng_dep is None or lat_arr is None or lng_arr is None:
         return None, None
+
+    prim_token = os.getenv("PRIM_API_TOKEN")
+    navitia_token = os.getenv("NAVITIA_TOKEN")
+    if not prim_token and not navitia_token:
+        return None, None
+
     try:
         dt = prochain_jour_ouvre_8h()
-        # Point d'entrée officiel de l'API Calculateur Île-de-France Mobilités (Navitia)
-        url = f"https://api.navitia.io/v1/coverage/fr-idf/journeys?from={lng_dep};{lat_dep}&to={lng_arr};{lat_arr}&datetime={dt}&datetime_represents=arrival&count=1"
-        req = urllib.request.Request(url)
-        auth = base64.b64encode(f"{token}:".encode()).decode()
-        req.add_header("Authorization", f"Basic {auth}")
+        if prim_token:
+            # Point d'accès officiel PRIM Île-de-France Mobilités
+            url = f"https://prim.iledefrance-mobilites.fr/marketplace/v2/navitia/journeys?from={lng_dep};{lat_dep}&to={lng_arr};{lat_arr}&datetime={dt}&datetime_represents=arrival&count=1"
+            req = urllib.request.Request(url)
+            req.add_header("apikey", prim_token.strip())
+        else:
+            # Point d'accès Navitia.io standard
+            url = f"https://api.navitia.io/v1/coverage/fr-idf/journeys?from={lng_dep};{lat_dep}&to={lng_arr};{lat_arr}&datetime={dt}&datetime_represents=arrival&count=1"
+            req = urllib.request.Request(url)
+            auth = base64.b64encode(f"{navitia_token.strip()}:".encode()).decode()
+            req.add_header("Authorization", f"Basic {auth}")
+
         with urllib.request.urlopen(req, timeout=5) as resp:
             data = json.loads(resp.read().decode())
             if "journeys" in data and len(data["journeys"]) > 0:
@@ -617,13 +630,12 @@ def calculer_tc_idfm(lat_dep, lng_dep, lat_arr, lng_arr):
                     if sec.get("type") == "public_transport" and "display_informations" in sec:
                         info = sec["display_informations"]
                         lignes.append(f"{info.get('commercial_mode', '')} {info.get('code', '')}".strip())
-                resume_lignes = " ➔ ".join(lignes) if lignes else "Cheminement direct"
+                resume_lignes = " ➔ ".join(lignes) if lignes else "Marche directe"
                 return duree_min, resume_lignes
     except Exception as e:
-        print("Erreur API IDFM PRIM :", e)
+        print("Erreur API TC IDFM :", e)
     return None, None
 
-# --- 5. MATCHING SPATIAL, POLYVALENCE & TEMPS DE TRAJET ---
 @app.get("/api/match")
 def match_remplacants(besoin_id: int):
     conn = get_db_connection()
@@ -641,7 +653,7 @@ def match_remplacants(besoin_id: int):
         SELECT r.id, r.nom, r.statut, c.intitule, r.rattachement,
                float8(r.heures_max - r.heures_actuelles) as dispo,
                r.telephone, r.email, ST_Y(r.geom), ST_X(r.geom),
-               ROUND((ST_Distance(r.geom::geography, e.geom::geography) / 1000.0)::numeric, 2) as dist_km,
+               COALESCE(ROUND((ST_Distance(r.geom::geography, e.geom::geography) / 1000.0)::numeric, 2), 0) as dist_km,
                ST_Y(e.geom), ST_X(e.geom)
         FROM remplacants r
         JOIN concours c ON r.concours_id = c.id
@@ -658,11 +670,11 @@ def match_remplacants(besoin_id: int):
 
     res = []
     for r in rows:
-        tc_min, tc_lignes = calculer_tc_navitia(r[8], r[9], r[11], r[12])
+        tc_min, tc_lignes = calculer_tc_idfm(r[8], r[9], r[11], r[12])
         res.append({
             "id": r[0], "nom": r[1], "statut": r[2], "concours": r[3], "adresse": r[4],
             "heures_restantes": r[5], "telephone": r[6], "email": r[7],
-            "latitude": r[8], "longitude": r[9], "distance_km": float(r[10]),
+            "latitude": r[8], "longitude": r[9], "distance_km": float(r[10] or 0.0),
             "tc_minutes": tc_min, "tc_lignes": tc_lignes
         })
     return res
