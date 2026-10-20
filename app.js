@@ -413,12 +413,14 @@ function chargerBesoins() {
         if (nbNouveaux > 0) { badge.style.display = "inline-block"; badge.innerText = nbNouveaux; }
         else { badge.style.display = "none"; }
 
+        // Si on est sur la vue liste des besoins, on affiche sur la carte uniquement les écoles qui ont un besoin
         if (document.getElementById('panel-liste-besoins').style.display !== 'none') {
             afficherCarteBesoinsGenerale();
         }
     });
 }
 
+// Affiche uniquement les établissements ayant un besoin actif (Vue 1)
 function afficherCarteBesoinsGenerale() {
     if (!map || !layerBesoinsEtabs) return;
     layerBesoinsEtabs.clearLayers();
@@ -453,6 +455,7 @@ function afficherCarteBesoinsGenerale() {
     }
 }
 
+// Retour de la vue remplaçants vers la liste des besoins
 function retourListeBesoins() {
     document.getElementById('panel-matching-profs').style.display = "none";
     document.getElementById('panel-liste-besoins').style.display = "block";
@@ -725,18 +728,18 @@ async function calculerTempsOSRM(profil, lat1, lng1, lat2, lng2) {
 }
 
 function genererLienGoogleTransit8h(lat1, lng1, lat2, lng2) {
-    // Format direct : mode transport public (transit), avec heure d'arrivée fixée à 08:00
-    // Google Maps gère automatiquement la date du prochain jour ouvré par défaut si on ne lui passe pas de date aberrante
-    return `https://www.google.com/maps/dir/?api=1&origin=${lat1},${lng1}&destination=${lat2},${lng2}&travelmode=transit&arrival_time=08:00`;
+    return `https://www.google.com/maps/dir/?api=1&origin=${lat1},${lng1}&destination=${lat2},${lng2}&travelmode=transit&arrival_time="08:00"`;
 }
 
 async function lancerMatching(besoin_id, lat, lng, nomEtab, matiere, heures) {
     besoinActifContext = besoin_id;
     ecoleMatchingActuelle = { lat, lng, nomEtab, matiere, heures };
 
+    // Bascule la colonne de gauche vers la vue Remplaçants
     document.getElementById('panel-liste-besoins').style.display = "none";
     document.getElementById('panel-matching-profs').style.display = "block";
 
+    // Nettoie la carte pour n'afficher QUE l'établissement concerné et ses remplaçants
     initMap();
     layerBesoinsEtabs.clearLayers();
     layerFocusEtab.clearLayers();
@@ -767,6 +770,7 @@ async function lancerMatching(besoin_id, lat, lng, nomEtab, matiere, heures) {
         return;
     }
 
+    // Place uniquement les marqueurs des remplaçants compatibles sur la carte
     const tousLesMarqueurs = [markerEcole];
     candidatsMatchingActuels.forEach(p => {
         if (p.latitude && p.longitude) {
@@ -781,8 +785,10 @@ async function lancerMatching(besoin_id, lat, lng, nomEtab, matiere, heures) {
         }
     });
 
+    // Ajuste automatiquement le zoom pour englober le collège et les remplaçants
     map.fitBounds(L.featureGroup(tousLesMarqueurs).getBounds(), { padding: [50, 50], maxZoom: 14 });
 
+    // Calcul des temps de parcours Voiture / Vélo / Marche
     await Promise.all(candidatsMatchingActuels.map(async (p) => {
         const [car, bike, foot] = await Promise.all([
             calculerTempsOSRM('car', p.latitude, p.longitude, lat, lng),
@@ -815,19 +821,16 @@ function afficherCandidatsTries(critereTri) {
         return a.distance_km - b.distance_km;
     });
 
-    const dateRef = (liste[0] && liste[0].tc_date_label) ? liste[0].tc_date_label : "Jour d'école à 08h00";
-
     let html = `<div style="background:#f0f4f8; padding:12px; border-radius:6px; border-left:4px solid var(--primary); margin-bottom:12px;">
         <strong>🏫 ${nomEtab}</strong><br>
-        Matière : <span class="badge blue">${matiere}</span> (<b>${heures}h</b>)<br>
-        <small style="color:#444;">🕒 Réf. horaires : <b>${dateRef}</b></small>
+        Matière : <span class="badge blue">${matiere}</span> (<b>${heures}h</b>)
     </div>
     <div class="form-group" style="margin-bottom:15px;">
         <label>Trier les remplaçants par :</label>
         <select onchange="afficherCandidatsTries(this.value)" style="font-weight:bold;">
             <option value="distance" ${critereTri==='distance'?'selected':''}>📍 Distance vol d'oiseau</option>
-            <option value="tc" ${critereTri==='tc'?'selected':''}>🚇 Transports en commun (Arrivée 8h00)</option>
-            <option value="car" ${critereTri==='car'?'selected':''}>🚗 Voiture (Trafic 8h00)</option>
+            <option value="tc" ${critereTri==='tc'?'selected':''}>🚇 Transports en commun (8h00)</option>
+            <option value="car" ${critereTri==='car'?'selected':''}>🚗 Voiture (trafic 8h00)</option>
             <option value="bike" ${critereTri==='bike'?'selected':''}>🚲 Vélo</option>
             <option value="foot" ${critereTri==='foot'?'selected':''}>🚶 À pied</option>
         </select>
