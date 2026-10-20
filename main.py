@@ -596,17 +596,18 @@ def prochain_jour_ouvre_8h():
     cible = now + timedelta(days=jours_ajout)
     return cible.strftime("%Y%m%dT080000")
 
-def calculer_tc_navitia(lat_dep, lng_dep, lat_arr, lng_arr):
-    token = os.getenv("NAVITIA_TOKEN")
+def calculer_tc_idfm(lat_dep, lng_dep, lat_arr, lng_arr):
+    token = os.getenv("PRIM_API_TOKEN") or os.getenv("NAVITIA_TOKEN")
     if not token:
         return None, None
     try:
         dt = prochain_jour_ouvre_8h()
+        # Point d'entrée officiel de l'API Calculateur Île-de-France Mobilités (Navitia)
         url = f"https://api.navitia.io/v1/coverage/fr-idf/journeys?from={lng_dep};{lat_dep}&to={lng_arr};{lat_arr}&datetime={dt}&datetime_represents=arrival&count=1"
         req = urllib.request.Request(url)
         auth = base64.b64encode(f"{token}:".encode()).decode()
         req.add_header("Authorization", f"Basic {auth}")
-        with urllib.request.urlopen(req, timeout=4) as resp:
+        with urllib.request.urlopen(req, timeout=5) as resp:
             data = json.loads(resp.read().decode())
             if "journeys" in data and len(data["journeys"]) > 0:
                 j = data["journeys"][0]
@@ -616,10 +617,10 @@ def calculer_tc_navitia(lat_dep, lng_dep, lat_arr, lng_arr):
                     if sec.get("type") == "public_transport" and "display_informations" in sec:
                         info = sec["display_informations"]
                         lignes.append(f"{info.get('commercial_mode', '')} {info.get('code', '')}".strip())
-                resume_lignes = " ➔ ".join(lignes) if lignes else "Marche directe"
+                resume_lignes = " ➔ ".join(lignes) if lignes else "Cheminement direct"
                 return duree_min, resume_lignes
     except Exception as e:
-        print("Erreur Navitia :", e)
+        print("Erreur API IDFM PRIM :", e)
     return None, None
 
 # --- 5. MATCHING SPATIAL, POLYVALENCE & TEMPS DE TRAJET ---
