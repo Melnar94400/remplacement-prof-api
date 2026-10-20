@@ -17,10 +17,10 @@ def get_db_connection():
         port="6543",
         database="postgres",
         user="postgres.scacemkfeugwaugxprhh",
-        password=os.getenv("SUPABASE_PASSWORD")
-        sslmode="require"  # <--- AJOUTEZ CETTE LIGNE (avec la virgule au-dessus)
+        password=os.getenv("SUPABASE_PASSWORD"),
+        sslmode="require"
     )
-
+    
 MAPPING_DISCIPLINES = {
     "Physique-Chimie": ["Physique-Chimie", "Sciences Physiques (Pro)", "SPCL (Techno)", "Mesures Physiques"],
     "Mathématiques": ["Mathématiques", "Mathématiques-Sciences (Pro)", "SNT (Seconde)"],
