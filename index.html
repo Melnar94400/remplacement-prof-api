@@ -94,7 +94,7 @@
                 
                 <button class="portail-btn btn-ecole" onclick="ouvrirModal('modal-login-ecole')">
                     🏫 Connexion Chef d'Établissement<br>
-                    <small style="font-weight:normal;">Gérer mes matières, mes professeurs en poste et déclarer une absence</small>
+                    <small style="font-weight:normal;">Gérer la carte des postes, les matières et déclarer un besoin</small>
                 </button>
                 <button class="portail-btn btn-rectorat" onclick="loginRectorat()">
                     🏢 Connexion Espace Rectorat<br>
@@ -113,42 +113,52 @@
                     <span id="ecole-titre-uai" class="badge blue"></span>
                 </div>
                 <div style="display:flex; gap:10px;">
-                    <button class="btn" onclick="ouvrirModal('modal-matieres-ecole')">📚 Gérer les matières de l'établissement</button>
+                    <button class="btn" onclick="ouvrirModal('modal-matieres-ecole')">📚 Matières de l'établissement</button>
                     <button class="btn btn-danger" onclick="deconnexion()">🚪 Déconnexion</button>
                 </div>
             </div>
 
             <div class="grid-2">
-                <!-- Colonne Gauche : Professeurs en poste -->
+                <!-- Colonne Gauche : Postes de l'établissement -->
                 <div class="card">
                     <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
-                        <h3 style="margin:0;">👨‍🏫 Professeurs en poste</h3>
+                        <h3 style="margin:0;">📋 Postes de l'établissement</h3>
                         <div>
-                            <button class="btn-small btn" onclick="ouvrirModal('modal-add-prof-ecole')">➕ Ajouter</button>
-                            <button class="btn-small btn-success" onclick="ouvrirModal('modal-import-prof-ecole')">📥 Import CSV</button>
+                            <button class="btn-small btn" onclick="ouvrirModal('modal-add-poste-ecole')">➕ Ajouter un poste</button>
+                            <button class="btn-small btn-success" onclick="ouvrirModal('modal-import-postes-ecole')">📥 Import CSV</button>
                         </div>
                     </div>
                     <table>
-                        <thead><tr><th>Nom</th><th>Matière enseignée</th><th>Poste</th><th></th></tr></thead>
-                        <tbody id="ecole-table-profs"></tbody>
+                        <thead><tr><th>Matière</th><th>Poste / Nature</th><th>Volume</th><th></th></tr></thead>
+                        <tbody id="ecole-table-postes"></tbody>
                     </table>
                 </div>
 
-                <!-- Colonne Droite : Déclarer l'absence d'un prof -->
+                <!-- Colonne Droite : Déclarer un besoin sur un poste -->
                 <div class="card">
-                    <h3 style="margin-top:0;">🚨 Déclarer une absence / un besoin</h3>
+                    <h3 style="margin-top:0;">🚨 Déclarer un besoin de remplacement</h3>
                     <div class="form-group">
-                        <label>Professeur absent (en poste dans l'établissement)</label>
-                        <select id="ecole-besoin-prof" onchange="autoRemplirDepuisProfEcole()"></select>
+                        <label>Poste concerné</label>
+                        <select id="ecole-besoin-poste" onchange="autoRemplirDepuisPosteEcole()"></select>
                     </div>
                     <div class="form-group">
-                        <label>Matière à assurer (modifiable ou issue de vos matières)</label>
+                        <label>Matière à assurer (modifiable)</label>
                         <input type="text" id="ecole-besoin-matiere" list="datalist-matieres-ecole" placeholder="Ex: Physique-Chimie, Biochimie...">
                         <datalist id="datalist-matieres-ecole"></datalist>
                     </div>
                     <div class="grid-2">
-                        <div class="form-group"><label>Volume horaire (h/sem)</label><input type="number" id="ecole-besoin-heures" value="18" step="0.5"></div>
-                        <div class="form-group"><label>Motif</label><input type="text" id="ecole-besoin-motif" value="Congé maladie"></div>
+                        <div class="form-group"><label>Heures à couvrir (h/sem)</label><input type="number" id="ecole-besoin-heures" value="18" step="0.5"></div>
+                        <div class="form-group">
+                            <label>Motif du besoin</label>
+                            <select id="ecole-besoin-motif">
+                                <option value="Congé maladie">Congé maladie</option>
+                                <option value="Congé maternité / paternité">Congé maternité / paternité</option>
+                                <option value="Poste vacant (BMP)">Poste vacant (BMP)</option>
+                                <option value="Complément temps partiel">Complément temps partiel</option>
+                                <option value="Stage / Formation">Stage / Formation</option>
+                                <option value="Autre">Autre</option>
+                            </select>
+                        </div>
                         <div class="form-group"><label>Date de début</label><input type="date" id="ecole-besoin-debut"></div>
                         <div class="form-group"><label>Date de fin</label><input type="date" id="ecole-besoin-fin"></div>
                     </div>
@@ -157,9 +167,9 @@
             </div>
 
             <div class="card" style="padding:0;">
-                <h3 style="padding: 18px 20px 0 20px; margin:0;">📋 Suivi des demandes de remplacement de l'établissement</h3>
+                <h3 style="padding: 18px 20px 0 20px; margin:0;">📋 Suivi des demandes de remplacement sur nos postes</h3>
                 <table style="margin-top:12px;">
-                    <thead><tr><th>Professeur remplacé</th><th>Matière</th><th>Période</th><th>Volume</th><th>Statut</th></tr></thead>
+                    <thead><tr><th>Poste concerné</th><th>Matière</th><th>Période</th><th>Volume</th><th>Statut</th></tr></thead>
                     <tbody id="ecole-table-suivi"></tbody>
                 </table>
             </div>
@@ -175,7 +185,7 @@
             </div>
             <div class="card" style="padding: 0;">
                 <table>
-                    <thead><tr><th>Statut</th><th>Établissement</th><th>Professeur absent</th><th>Matière (Détection Rectorat)</th><th>Période</th><th>Heures</th><th>Actions</th></tr></thead>
+                    <thead><tr><th>Statut</th><th>Établissement</th><th>Poste & Motif</th><th>Matière (Détection Rectorat)</th><th>Période</th><th>Heures</th><th>Actions</th></tr></thead>
                     <tbody id="table-besoins-body"></tbody>
                 </table>
             </div>
@@ -186,12 +196,12 @@
     <div id="view-etabs" class="view-container">
         <div class="data-layout">
             <div class="header-title">
-                <span>🏫 Annuaire & Fiches des Établissements</span>
+                <span>🏫 Annuaire & Dotations des Établissements</span>
                 <input type="text" placeholder="🔍 Filtrer un établissement..." style="padding:8px; width:260px;" oninput="filtrerTableEtabs(this.value)">
             </div>
             <div class="card" style="padding: 0;">
                 <table>
-                    <thead><tr><th>UAI</th><th>Nom de l'établissement</th><th>Catégorie</th><th>Profs en poste</th><th>Besoins actifs</th><th>Actions</th></tr></thead>
+                    <thead><tr><th>UAI</th><th>Nom de l'établissement</th><th>Catégorie</th><th>Postes & Volume horaire</th><th>Besoins actifs</th><th>Actions</th></tr></thead>
                     <tbody id="table-etabs-body"></tbody>
                 </table>
             </div>
@@ -250,7 +260,7 @@
             <h2 class="header-title">📜 Historique des affectations</h2>
             <div class="card" style="padding: 0;">
                 <table>
-                    <thead><tr><th>Remplaçant</th><th>Établissement</th><th>Prof remplacé</th><th>Matière</th><th>Période</th><th>Volume</th><th>Actions</th></tr></thead>
+                    <thead><tr><th>Remplaçant</th><th>Établissement</th><th>Poste couvert</th><th>Matière</th><th>Période</th><th>Volume</th><th>Actions</th></tr></thead>
                     <tbody id="table-affectations-body"></tbody>
                 </table>
             </div>
@@ -294,14 +304,14 @@
         </div>
     </div>
 
-    <!-- Modal 1B : Gérer les matières de l'établissement (Côté Chef d'établissement) -->
+    <!-- Modal 1B : Gérer les matières de l'établissement -->
     <div id="modal-matieres-ecole" class="modal-overlay">
         <div class="modal-content" style="width: 550px;">
             <button class="modal-close" onclick="fermerModal('modal-matieres-ecole')">×</button>
             <h3 style="margin-top:0; color:var(--primary);">📚 Matières enseignées dans l'établissement</h3>
             <p style="font-size:12px; color:#666;">Ajoutez, renommez ou supprimez librement les matières présentes dans votre établissement.</p>
             <div style="display:flex; gap:10px; margin-bottom:15px;">
-                <input type="text" id="ecole-new-matiere" placeholder="Nouvelle matière (ex: Sciences de Laboratoire, biotechnologies...)" style="flex:1; padding:8px;">
+                <input type="text" id="ecole-new-matiere" placeholder="Nouvelle matière (ex: Sciences de Laboratoire, Biotechnologies...)" style="flex:1; padding:8px;">
                 <button class="btn btn-success" onclick="ecoleAjouterMatiere()">➕ Ajouter</button>
             </div>
             <table>
@@ -311,26 +321,32 @@
         </div>
     </div>
 
-    <!-- Modal 2 : Ajouter un prof en poste dans l'école -->
-    <div id="modal-add-prof-ecole" class="modal-overlay">
+    <!-- Modal 2 : Ajouter un poste dans l'école -->
+    <div id="modal-add-poste-ecole" class="modal-overlay">
         <div class="modal-content" style="width: 420px;">
-            <button class="modal-close" onclick="fermerModal('modal-add-prof-ecole')">×</button>
-            <h3 style="margin-top:0;">➕ Ajouter un professeur en poste</h3>
-            <div class="form-group"><label>Nom et Prénom</label><input type="text" id="pe-nom" placeholder="Ex: Mme Martin"></div>
-            <div class="form-group"><label>Matière enseignée dans l'établissement</label><select id="pe-matiere"></select></div>
-            <div class="form-group"><label>Heures sur le poste (h/sem)</label><input type="number" id="pe-heures" value="18" step="0.5"></div>
-            <button class="btn btn-success" style="width:100%;" onclick="ecoleAjouterProf()">Enregistrer</button>
+            <button class="modal-close" onclick="fermerModal('modal-add-poste-ecole')">×</button>
+            <h3 style="margin-top:0;">➕ Ajouter un poste</h3>
+            <div class="form-group"><label>Matière enseignée</label><select id="pe-matiere"></select></div>
+            <div class="form-group"><label>Volume horaire du poste (h/sem)</label><input type="number" id="pe-heures" value="18" step="0.5"></div>
+            <div class="form-group">
+                <label>Référence / Nature du poste <small>(Optionnel : numéroté automatiquement si vide)</small></label>
+                <input type="text" id="pe-nom" placeholder="Ex: Poste fixe, BMP, CSD...">
+            </div>
+            <button class="btn btn-success" style="width:100%;" onclick="ecoleAjouterPoste()">Enregistrer le poste</button>
         </div>
     </div>
 
-    <!-- Modal 3 : Importer CSV de profs en poste dans l'école -->
-    <div id="modal-import-prof-ecole" class="modal-overlay">
+    <!-- Modal 3 : Importer CSV de postes dans l'école -->
+    <div id="modal-import-postes-ecole" class="modal-overlay">
         <div class="modal-content">
-            <button class="modal-close" onclick="fermerModal('modal-import-prof-ecole')">×</button>
-            <h3 style="margin-top:0;">📥 Importer la liste des professeurs de l'école (CSV)</h3>
-            <p style="font-size:12px; color:#555;">Format attendu (séparateur point-virgule <code>;</code>) : <code>Nom;Matière enseignée;Heures</code></p>
-            <textarea id="csv-prof-ecole" rows="7" placeholder="M. Dupont;Physique-Chimie;18&#10;Mme Durand;SVT;18&#10;M. Petit;Biochimie Génie Biologique;18"></textarea>
-            <button class="btn btn-success" style="width:100%; margin-top:10px;" onclick="ecoleImporterCSV()">Importer les professeurs</button>
+            <button class="modal-close" onclick="fermerModal('modal-import-postes-ecole')">×</button>
+            <h3 style="margin-top:0;">📥 Importer la carte des postes de l'établissement (CSV)</h3>
+            <p style="font-size:12px; color:#555;">
+                Format simple (2 colonnes) : <code>Matière;Heures</code> (numérotation automatique)<br>
+                Ou avec libellé (3 colonnes) : <code>Nature du poste;Matière;Heures</code>
+            </p>
+            <textarea id="csv-postes-ecole" rows="7" placeholder="Physique-Chimie;18&#10;Physique-Chimie;18&#10;BMP;SVT;9&#10;Mathématiques;18"></textarea>
+            <button class="btn btn-success" style="width:100%; margin-top:10px;" onclick="ecoleImporterCSV()">Importer les postes</button>
         </div>
     </div>
 
@@ -344,7 +360,6 @@
             </p>
             <input type="hidden" id="res-besoin-id">
 
-            <!-- Option 1 : Associer à une matière existante -->
             <div class="card" style="border:1px solid #ddd; margin-bottom:15px;">
                 <h4 style="margin-top:0;">Option 1 : Faire correspondre à une matière officielle existante</h4>
                 <p style="font-size:12px; color:#666; margin-top:0;">Idéal si l'établissement a fait une faute de frappe ou utilisé un synonyme.</p>
@@ -359,7 +374,6 @@
                 <button class="btn" style="width:100%;" onclick="validerResolutionMatiere('associer')">✅ Rattacher à cette matière existante</button>
             </div>
 
-            <!-- Option 2 : Créer la matière et choisir les concours -->
             <div class="card" style="border:1px solid #ddd; margin-bottom:0;">
                 <h4 style="margin-top:0;">Option 2 : Créer cette matière dans la base officielle & rattacher aux concours</h4>
                 <p style="font-size:12px; color:#666; margin-top:0;">Idéal pour une nouvelle matière spécifique (technologique, professionnelle, option...).</p>
@@ -382,10 +396,10 @@
             <button class="modal-close" onclick="fermerModal('modal-fiche-etab')">×</button>
             <h2 id="fe-nom" style="margin-top:0; color:var(--primary);"></h2>
             <p id="fe-meta" style="color:#666; font-size:13px;"></p>
-            <h4>👨‍🏫 Professeurs en poste dans cet établissement</h4>
-            <table><thead><tr><th>Nom</th><th>Matière enseignée</th><th>Heures</th></tr></thead><tbody id="fe-profs"></tbody></table>
-            <h4 style="margin-top:20px;">🚨 Besoins en attente</h4>
-            <table><thead><tr><th>Prof absent</th><th>Matière</th><th>Période</th><th>Heures</th></tr></thead><tbody id="fe-besoins"></tbody></table>
+            <h4>📋 Carte des postes de l'établissement</h4>
+            <table><thead><tr><th>Matière enseignée</th><th>Poste / Nature</th><th>Volume horaire</th></tr></thead><tbody id="fe-postes"></tbody></table>
+            <h4 style="margin-top:20px;">🚨 Besoins en attente sur ces postes</h4>
+            <table><thead><tr><th>Poste & Motif</th><th>Matière</th><th>Période</th><th>Heures</th></tr></thead><tbody id="fe-besoins"></tbody></table>
         </div>
     </div>
 
@@ -437,7 +451,7 @@
             <h4>Matières habilitées à enseigner :</h4>
             <div id="fr-matieres" style="margin-bottom:15px;"></div>
             <h4>Historique des remplacements :</h4>
-            <table><thead><tr><th>Période</th><th>Établissement</th><th>Prof remplacé</th><th>Matière</th><th>Heures</th></tr></thead><tbody id="fr-historique"></tbody></table>
+            <table><thead><tr><th>Période</th><th>Établissement</th><th>Poste couvert</th><th>Matière</th><th>Heures</th></tr></thead><tbody id="fr-historique"></tbody></table>
         </div>
     </div>
 

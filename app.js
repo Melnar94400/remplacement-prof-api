@@ -7,7 +7,7 @@ let besoinsData = [];
 let affectationsData = [];
 let ecoleConnectee = null;
 let matieresEcoleActuelle = [];
-let profsEcoleActuelle = [];
+let postesEcoleActuelle = [];
 let besoinActifContext = null;
 let autocompleteTimeout = null;
 
@@ -109,7 +109,7 @@ function creerMatiere() {
         .then(() => { fermerModal('modal-add-matiere'); chargerReferentiel(); });
 }
 
-// --- 2. ESPACE ÉTABLISSEMENT (COMPTE ÉCOLE & MATIÈRES LOCALES) ---
+// --- 2. ESPACE ÉTABLISSEMENT (COMPTE ÉCOLE, MATIÈRES & POSTES) ---
 function chargerEtablissements() {
     fetch(`${API_URL}/etablissements`).then(r => r.json()).then(data => {
         etablissementsData = data;
@@ -170,10 +170,10 @@ function chargerDonneesEcoleConnectee() {
     fetch(`${API_URL}/ecoles/${ecoleConnectee.uai}/matieres`).then(r => r.json()).then(mats => {
         matieresEcoleActuelle = mats;
         const tbMat = document.getElementById('ecole-table-matieres');
-        const selMatProf = document.getElementById('pe-matiere');
+        const selMatPoste = document.getElementById('pe-matiere');
         const dlMat = document.getElementById('datalist-matieres-ecole');
         tbMat.innerHTML = "";
-        selMatProf.innerHTML = "";
+        selMatPoste.innerHTML = "";
         dlMat.innerHTML = "";
 
         mats.forEach(m => {
@@ -184,29 +184,29 @@ function chargerDonneesEcoleConnectee() {
                     <button class="btn-small btn-danger" onclick="ecoleSupprimerMatiere(${m.id})">🗑️</button>
                 </td>
             </tr>`;
-            selMatProf.appendChild(new Option(m.nom, m.nom));
+            selMatPoste.appendChild(new Option(m.nom, m.nom));
             dlMat.appendChild(new Option(m.nom, m.nom));
         });
     });
 
-    // 2. Professeurs en poste dans l'établissement
-    fetch(`${API_URL}/ecoles/${ecoleConnectee.uai}/professeurs`).then(r => r.json()).then(profs => {
-        profsEcoleActuelle = profs;
-        const tbody = document.getElementById('ecole-table-profs');
-        const selProf = document.getElementById('ecole-besoin-prof');
+    // 2. Postes de l'établissement
+    fetch(`${API_URL}/ecoles/${ecoleConnectee.uai}/professeurs`).then(r => r.json()).then(postes => {
+        postesEcoleActuelle = postes;
+        const tbody = document.getElementById('ecole-table-postes');
+        const selPoste = document.getElementById('ecole-besoin-poste');
         tbody.innerHTML = "";
-        selProf.innerHTML = "";
+        selPoste.innerHTML = "";
 
-        profs.forEach(p => {
+        postes.forEach(p => {
             tbody.innerHTML += `<tr>
-                <td><strong>${p.nom}</strong></td>
                 <td><span class="badge blue">${p.matiere_ecole}</span></td>
-                <td>${p.heures_poste}h</td>
-                <td><button class="btn-small btn-danger" onclick="ecoleSupprimerProf(${p.id})">🗑️</button></td>
+                <td><strong>${p.nom}</strong></td>
+                <td><strong>${p.heures_poste}h</strong></td>
+                <td><button class="btn-small btn-danger" onclick="ecoleSupprimerPoste(${p.id})">🗑️</button></td>
             </tr>`;
-            selProf.appendChild(new Option(`${p.nom} (${p.matiere_ecole} - ${p.heures_poste}h)`, p.id));
+            selPoste.appendChild(new Option(`${p.matiere_ecole} — ${p.heures_poste}h (${p.nom})`, p.id));
         });
-        autoRemplirDepuisProfEcole();
+        autoRemplirDepuisPosteEcole();
     });
 
     // 3. Suivi des demandes et affectations de l'école
@@ -218,7 +218,7 @@ function chargerDonneesEcoleConnectee() {
         tbody.innerHTML = "";
         besoins.filter(b => b.uai === ecoleConnectee.uai).forEach(b => {
             tbody.innerHTML += `<tr>
-                <td><strong>${b.prof_absent_nom}</strong> <small>(${b.motif})</small></td>
+                <td><strong>${b.poste_nom}</strong> <small>(${b.motif})</small></td>
                 <td>${b.matiere} ${!b.reconnue ? '<span class="badge orange">En cours de qualification Rectorat</span>' : ''}</td>
                 <td>${b.date_debut} ➔ ${b.date_fin}</td>
                 <td>${b.heures}h</td>
@@ -227,11 +227,11 @@ function chargerDonneesEcoleConnectee() {
         });
         affectations.filter(a => a.uai === ecoleConnectee.uai).forEach(a => {
             tbody.innerHTML += `<tr>
-                <td><strong>${a.prof_remplace}</strong></td>
+                <td><strong>${a.poste_couvert}</strong></td>
                 <td>${a.discipline}</td>
                 <td>${a.date_debut} ➔ ${a.date_fin}</td>
                 <td>${a.heures}h</td>
-                <td><span class="badge green">✅ Remplacé par ${a.nom_prof}</span></td>
+                <td><span class="badge green">✅ Couvert par ${a.nom_prof}</span></td>
             </tr>`;
         });
     });
@@ -263,16 +263,16 @@ function ecoleSupprimerMatiere(mat_id) {
     }
 }
 
-function autoRemplirDepuisProfEcole() {
-    const profId = parseInt(document.getElementById('ecole-besoin-prof').value);
-    const prof = profsEcoleActuelle.find(p => p.id === profId);
-    if (prof) {
-        document.getElementById('ecole-besoin-heures').value = prof.heures_poste;
-        document.getElementById('ecole-besoin-matiere').value = prof.matiere_ecole;
+function autoRemplirDepuisPosteEcole() {
+    const posteId = parseInt(document.getElementById('ecole-besoin-poste').value);
+    const poste = postesEcoleActuelle.find(p => p.id === posteId);
+    if (poste) {
+        document.getElementById('ecole-besoin-heures').value = poste.heures_poste;
+        document.getElementById('ecole-besoin-matiere').value = poste.matiere_ecole;
     }
 }
 
-function ecoleAjouterProf() {
+function ecoleAjouterPoste() {
     const data = {
         nom: document.getElementById('pe-nom').value,
         matiere_ecole: document.getElementById('pe-matiere').value,
@@ -282,33 +282,33 @@ function ecoleAjouterProf() {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data)
     }).then(() => {
         document.getElementById('pe-nom').value = "";
-        fermerModal('modal-add-prof-ecole');
+        fermerModal('modal-add-poste-ecole');
         chargerDonneesEcoleConnectee();
     });
 }
 
 function ecoleImporterCSV() {
-    const csv_text = document.getElementById('csv-prof-ecole').value;
+    const csv_text = document.getElementById('csv-postes-ecole').value;
     fetch(`${API_URL}/ecoles/${ecoleConnectee.uai}/professeurs/import`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ csv_text })
     }).then(r => r.json()).then(res => {
-        alert(`${res.ajoutes} professeurs importés avec succès.`);
-        fermerModal('modal-import-prof-ecole');
+        alert(`${res.ajoutes} poste(s) importé(s) avec succès.`);
+        fermerModal('modal-import-postes-ecole');
         chargerDonneesEcoleConnectee();
     });
 }
 
-function ecoleSupprimerProf(id) {
-    if (confirm("Retirer ce professeur de l'établissement ?")) {
+function ecoleSupprimerPoste(id) {
+    if (confirm("Supprimer ce poste de l'établissement ?")) {
         fetch(`${API_URL}/ecoles/professeurs/${id}`, { method: 'DELETE' }).then(() => chargerDonneesEcoleConnectee());
     }
 }
 
 function ecoleDeclarerBesoin() {
-    const prof_absent_id = parseInt(document.getElementById('ecole-besoin-prof').value);
+    const prof_absent_id = parseInt(document.getElementById('ecole-besoin-poste').value);
     const matiere_declaree = document.getElementById('ecole-besoin-matiere').value.trim();
-    if (!prof_absent_id) return alert("Ajoutez et sélectionnez d'abord le professeur absent.");
-    if (!matiere_declaree) return alert("Veuillez indiquer la matière à remplacer.");
+    if (!prof_absent_id) return alert("Créez et sélectionnez d'abord le poste concerné.");
+    if (!matiere_declaree) return alert("Veuillez indiquer la matière à assurer.");
 
     const data = {
         uai: ecoleConnectee.uai,
@@ -354,7 +354,7 @@ function chargerBesoins() {
             if (b.reconnue) {
                 matiereHtml = `<span class="badge blue">✅ ${b.matiere_officielle}</span> 
                                <button class="btn-small btn-warning" title="Modifier la matière rattachée" onclick="ouvrirModalResoudreMatiere(${b.id}, '${b.matiere_declaree.replace(/'/g, "\\'")}')">✏️</button>`;
-                actionMatchingHtml = `<button class="btn-small btn" onclick="lancerMatching(${b.id}, ${b.latitude}, ${b.longitude}, '${b.nom_etablissement.replace(/'/g, "\\'")}', '${b.matiere_officielle.replace(/'/g, "\\'")}', ${b.heures}, '${b.prof_absent_nom.replace(/'/g, "\\'")}')">🗺️ Trouver un remplaçant</button>`;
+                actionMatchingHtml = `<button class="btn-small btn" onclick="lancerMatching(${b.id}, ${b.latitude}, ${b.longitude}, '${b.nom_etablissement.replace(/'/g, "\\'")}', '${b.matiere_officielle.replace(/'/g, "\\'")}', ${b.heures}, '${b.poste_nom.replace(/'/g, "\\'")}')">🗺️ Trouver un remplaçant</button>`;
             } else {
                 matiereHtml = `<span class="badge orange">⚠️ Non reconnue : "${b.matiere_declaree}"</span>`;
                 actionMatchingHtml = `<button class="btn-small btn-warning" onclick="ouvrirModalResoudreMatiere(${b.id}, '${b.matiere_declaree.replace(/'/g, "\\'")}')">🔧 Qualifier / Créer la matière</button>`;
@@ -363,7 +363,7 @@ function chargerBesoins() {
             tbody.innerHTML += `<tr class="${!b.vu_rectorat ? 'unseen-alert' : ''}">
                 <td>${!b.vu_rectorat ? '<span class="badge red">🔔 NOUVEAU</span>' : '<span class="badge">Vu</span>'}</td>
                 <td><strong>${b.nom_etablissement}</strong></td>
-                <td>${b.prof_absent_nom} <small>(${b.motif})</small></td>
+                <td><strong>${b.poste_nom}</strong><br><small style="color:#666;">${b.motif}</small></td>
                 <td>${matiereHtml}</td>
                 <td>${b.date_debut} ➔ ${b.date_fin}</td>
                 <td><strong>${b.heures}h</strong></td>
@@ -387,7 +387,6 @@ function ouvrirModalResoudreMatiere(besoin_id, matiereDeclaree) {
 
     remplirSelectsReferentiel();
 
-    // Génère les cases à cocher des concours pour l'Option 2
     const boxConcours = document.getElementById('res-liste-concours');
     boxConcours.innerHTML = "";
     referentiel.concours.forEach(c => {
@@ -444,9 +443,9 @@ function afficherTableEtabs(liste) {
             <td><code>${e.uai}</code></td>
             <td><strong>${e.nom}</strong></td>
             <td><span class="badge">${e.type}</span></td>
-            <td><span class="badge blue">${e.nb_profs} prof(s)</span></td>
+            <td><span class="badge blue">${e.nb_postes} poste(s) — ${e.total_heures}h</span></td>
             <td>${e.nb_besoins > 0 ? `<span class="badge red">${e.nb_besoins} besoin(s)</span>` : '<span class="badge green">0</span>'}</td>
-            <td><button class="btn-small btn" onclick="ouvrirFicheEtab('${e.uai}')">👁️ Voir la fiche</button></td>
+            <td><button class="btn-small btn" onclick="ouvrirFicheEtab('${e.uai}')">👁️ Voir les postes</button></td>
         </tr>`;
     });
 }
@@ -460,18 +459,18 @@ function ouvrirFicheEtab(uai) {
     const e = etablissementsData.find(x => x.uai === uai);
     if (!e) return;
     document.getElementById('fe-nom').innerText = e.nom;
-    document.getElementById('fe-meta').innerText = `UAI : ${e.uai} | Catégorie : ${e.type} (${e.degre})`;
+    document.getElementById('fe-meta').innerText = `UAI : ${e.uai} | Catégorie : ${e.type} (${e.degre}) | Dotation déclarée : ${e.nb_postes} poste(s) (${e.total_heures}h)`;
 
-    fetch(`${API_URL}/ecoles/${uai}/professeurs`).then(r => r.json()).then(profs => {
-        const tb = document.getElementById('fe-profs');
-        tb.innerHTML = profs.length ? "" : "<tr><td colspan='3'>Aucun professeur enregistré</td></tr>";
-        profs.forEach(p => tb.innerHTML += `<tr><td><strong>${p.nom}</strong></td><td>${p.matiere_ecole}</td><td>${p.heures_poste}h</td></tr>`);
+    fetch(`${API_URL}/ecoles/${uai}/professeurs`).then(r => r.json()).then(postes => {
+        const tb = document.getElementById('fe-postes');
+        tb.innerHTML = postes.length ? "" : "<tr><td colspan='3'>Aucun poste renseigné</td></tr>";
+        postes.forEach(p => tb.innerHTML += `<tr><td><span class="badge blue">${p.matiere_ecole}</span></td><td><strong>${p.nom}</strong></td><td>${p.heures_poste}h</td></tr>`);
     });
 
     const tbBesoins = document.getElementById('fe-besoins');
     const bEtab = besoinsData.filter(b => b.uai === uai);
     tbBesoins.innerHTML = bEtab.length ? "" : "<tr><td colspan='4'>Aucun besoin en attente</td></tr>";
-    bEtab.forEach(b => tbBesoins.innerHTML += `<tr><td>${b.prof_absent_nom}</td><td>${b.matiere}</td><td>${b.date_debut} ➔ ${b.date_fin}</td><td>${b.heures}h</td></tr>`);
+    bEtab.forEach(b => tbBesoins.innerHTML += `<tr><td><strong>${b.poste_nom}</strong> (${b.motif})</td><td>${b.matiere}</td><td>${b.date_debut} ➔ ${b.date_fin}</td><td>${b.heures}h</td></tr>`);
 
     ouvrirModal('modal-fiche-etab');
 }
@@ -632,7 +631,7 @@ function afficherFicheRemplacant(id) {
     fetch(`${API_URL}/remplacants/${id}/historique`).then(r => r.json()).then(hist => {
         const tb = document.getElementById('fr-historique');
         tb.innerHTML = hist.length ? "" : "<tr><td colspan='5'>Aucune affectation</td></tr>";
-        hist.forEach(h => tb.innerHTML += `<tr><td>${h.date_debut} ➔ ${h.date_fin}</td><td><strong>${h.etablissement}</strong></td><td>${h.prof_remplace}</td><td>${h.discipline}</td><td>${h.heures}h</td></tr>`);
+        hist.forEach(h => tb.innerHTML += `<tr><td>${h.date_debut} ➔ ${h.date_fin}</td><td><strong>${h.etablissement}</strong></td><td>${h.poste_couvert}</td><td>${h.discipline}</td><td>${h.heures}h</td></tr>`);
         ouvrirModal('modal-fiche-remp');
     });
 }
@@ -672,7 +671,7 @@ function chargerCarteEtablissements() {
     });
 }
 
-function lancerMatching(besoin_id, lat, lng, nomEtab, matiere, heures, profAbsent) {
+function lancerMatching(besoin_id, lat, lng, nomEtab, matiere, heures, posteNom) {
     besoinActifContext = besoin_id;
     switchTab('map');
     setTimeout(() => map.setView([lat, lng], 14), 250);
@@ -681,7 +680,7 @@ function lancerMatching(besoin_id, lat, lng, nomEtab, matiere, heures, profAbsen
         const box = document.getElementById('search-results');
         let html = `<div style="background:#f0f4f8; padding:12px; border-radius:6px; border-left:4px solid var(--primary); margin-bottom:15px;">
             <strong>${nomEtab}</strong><br>
-            Remplacement de : <b>${profAbsent}</b><br>
+            Poste à couvrir : <b>${posteNom}</b><br>
             Matière officielle : <span class="badge blue">${matiere}</span> (<b>${heures}h</b>)
         </div>`;
 
@@ -730,7 +729,7 @@ function chargerAffectations() {
             tbody.innerHTML += `<tr>
                 <td><strong>${a.nom_prof}</strong></td>
                 <td>${a.nom_etablissement}</td>
-                <td>${a.prof_remplace}</td>
+                <td>${a.poste_couvert}</td>
                 <td><span class="badge blue">${a.discipline}</span></td>
                 <td>${a.date_debut} ➔ ${a.date_fin}</td>
                 <td><strong>${a.heures}h</strong></td>
