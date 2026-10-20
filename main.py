@@ -4,7 +4,7 @@ import io
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
-from typing import Optional
+from typing import Optional, List
 import psycopg2
 from dotenv import load_dotenv
 
@@ -30,6 +30,31 @@ def get_db_connection():
         sslmode="require"
     )
 
+# --- MIGRATION AUTOMATIQUE DU SCHÉMA (V11) ---
+def init_v11_migration():
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS matieres_etablissement (
+                id SERIAL PRIMARY KEY,
+                uai VARCHAR(8) REFERENCES etablissements(uai) ON DELETE CASCADE,
+                nom VARCHAR(100) NOT NULL,
+                UNIQUE(uai, nom)
+            );
+            ALTER TABLE professeurs_etablissement ADD COLUMN IF NOT EXISTS matiere_ecole VARCHAR(100) DEFAULT '';
+            ALTER TABLE besoins ALTER COLUMN matiere_id DROP NOT NULL;
+            ALTER TABLE besoins ADD COLUMN IF NOT EXISTS matiere_declaree VARCHAR(150) DEFAULT '';
+            ALTER TABLE affectations ADD COLUMN IF NOT EXISTS matiere_nom VARCHAR(150) DEFAULT '';
+        """)
+        conn.commit()
+        cur.close()
+        conn.close()
+    except Exception as e:
+        print("Erreur migration V11 :", e)
+
+init_v11_migration()
+
 # --- MODÈLES DE DONNÉES ---
 class LoginEcole(BaseModel):
     uai: str
@@ -43,13 +68,16 @@ class ConcoursCreate(BaseModel):
 class MatiereCreate(BaseModel):
     nom: str
 
+class MatiereEcoleUpdate(BaseModel):
+    nom: str
+
 class LiaisonCreate(BaseModel):
     concours_id: int
     matiere_id: int
 
 class ProfEtabCreate(BaseModel):
     nom: str
-    concours_id: int
+    matiere_ecole: str
     heures_poste: float = 18.0
 
 class CSVImport(BaseModel):
@@ -71,11 +99,18 @@ class RemplacantCreate(BaseModel):
 class BesoinCreate(BaseModel):
     uai: str
     prof_absent_id: int
-    matiere_id: int
+    matiere_declaree: str
     heures: float
     date_debut: str
     date_fin: str
     motif: Optional[str] = "Absence"
+
+class ResoudreMatiereRequest(BaseModel):
+    mode: str  # "associer" ou "creer"
+    matiere_id: Optional[int] = None
+    corriger_ecole: Optional[bool] = True
+    nouveau_nom: Optional[str] = ""
+    concours_ids: Optional[List[int]] = []
 
 class AffectationRequest(BaseModel):
     remplacant_id: int
@@ -86,7 +121,7 @@ class AffectationUpdate(BaseModel):
     date_debut: str
     date_fin: str
 
-# --- 1. RÉFÉRENTIEL ÉVOLUTIF (CONCOURS & MATIÈRES) ---
+# --- 1. RÉFÉRENTIEL ÉVOLUTIF (CONCOURS & MATIÈRES OFFICIELLES) ---
 @app.get("/api/referentiel")
 def get_referentiel():
     conn = get_db_connection()
@@ -128,7 +163,7 @@ def add_concours(c: ConcoursCreate):
 def add_matiere(m: MatiereCreate):
     conn = get_db_connection()
     cur = conn.cursor()
-    cur.execute("INSERT INTO matieres (nom) VALUES (%s) ON CONFLICT DO NOTHING;", (m.nom,))
+    cur.execute("INSERT INTO matieres (nom) VALUES (%s) ON CONFLICT DO NOTHING;", (m.nom.strip(),))
     conn.commit()
     cur.close()
     conn.close()
@@ -157,7 +192,7 @@ def delete_liaison(concours_id: int, matiere_id: int):
     conn.close()
     return {"status": "deleted"}
 
-# --- 2. ÉTABLISSEMENTS & COMPTES ÉCOLES ---
+# --- 2. ÉTABLISSEMENTS, MATIÈRES LOCALES & PROFESSEURS EN POSTE ---
 @app.get("/api/etablissements")
 def get_etablissements():
     conn = get_db_connection()
@@ -189,18 +224,77 @@ def login_ecole(creds: LoginEcole):
         raise HTTPException(status_code=401, detail="Identifiants incorrects")
     return {"uai": row[0], "nom": row[1], "type": row[2], "degre": row[3]}
 
+# Gestion des matières propres à l'établissement
+@app.get("/api/ecoles/{uai}/matieres")
+def get_matieres_ecole(uai: str):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT COUNT(*) FROM matieres_etablissement WHERE uai = %s;", (uai,))
+    if cur.fetchone()[0] == 0:
+        # Initialisation automatique avec les matières de base au premier accès
+        cur.execute("""
+            INSERT INTO matieres_etablissement (uai, nom)
+            SELECT %s, nom FROM matieres
+            ON CONFLICT DO NOTHING;
+        """, (uai,))
+        conn.commit()
+        
+    cur.execute("SELECT id, nom FROM matieres_etablissement WHERE uai = %s ORDER BY nom;", (uai,))
+    res = [{"id": r[0], "nom": r[1]} for r in cur.fetchall()]
+    cur.close()
+    conn.close()
+    return res
+
+@app.post("/api/ecoles/{uai}/matieres")
+def add_matiere_ecole(uai: str, m: MatiereCreate):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("INSERT INTO matieres_etablissement (uai, nom) VALUES (%s, %s) ON CONFLICT DO NOTHING;", (uai, m.nom.strip()))
+    conn.commit()
+    cur.close()
+    conn.close()
+    return {"status": "ok"}
+
+@app.put("/api/ecoles/{uai}/matieres/{mat_id}")
+def update_matiere_ecole(uai: str, mat_id: int, m: MatiereEcoleUpdate):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("SELECT nom FROM matieres_etablissement WHERE id = %s AND uai = %s;", (mat_id, uai))
+    old = cur.fetchone()
+    if old:
+        nouveau = m.nom.strip()
+        cur.execute("UPDATE matieres_etablissement SET nom = %s WHERE id = %s;", (nouveau, mat_id))
+        cur.execute("UPDATE professeurs_etablissement SET matiere_ecole = %s WHERE uai = %s AND matiere_ecole = %s;", (nouveau, uai, old[0]))
+        conn.commit()
+    cur.close()
+    conn.close()
+    return {"status": "updated"}
+
+@app.delete("/api/ecoles/{uai}/matieres/{mat_id}")
+def delete_matiere_ecole(uai: str, mat_id: int):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute("DELETE FROM matieres_etablissement WHERE id = %s AND uai = %s;", (mat_id, uai))
+    conn.commit()
+    cur.close()
+    conn.close()
+    return {"status": "deleted"}
+
+# Gestion des professeurs en poste dans l'établissement
 @app.get("/api/ecoles/{uai}/professeurs")
 def get_profs_ecole(uai: str):
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute("""
-        SELECT pe.id, pe.nom, pe.concours_id, COALESCE(c.intitule, 'Non défini'), float8(pe.heures_poste)
+        SELECT pe.id, pe.nom,
+               COALESCE(NULLIF(pe.matiere_ecole, ''), c.intitule, 'Non définie') as matiere_affichee,
+               float8(pe.heures_poste)
         FROM professeurs_etablissement pe
         LEFT JOIN concours c ON pe.concours_id = c.id
         WHERE pe.uai = %s
         ORDER BY pe.nom;
     """, (uai,))
-    res = [{"id": r[0], "nom": r[1], "concours_id": r[2], "concours": r[3], "heures_poste": r[4]} for r in cur.fetchall()]
+    res = [{"id": r[0], "nom": r[1], "matiere_ecole": r[2], "heures_poste": r[3]} for r in cur.fetchall()]
     cur.close()
     conn.close()
     return res
@@ -210,9 +304,10 @@ def add_prof_ecole(uai: str, p: ProfEtabCreate):
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute(
-        "INSERT INTO professeurs_etablissement (uai, nom, concours_id, heures_poste) VALUES (%s, %s, %s, %s);",
-        (uai, p.nom, p.concours_id, p.heures_poste)
+        "INSERT INTO professeurs_etablissement (uai, nom, matiere_ecole, heures_poste) VALUES (%s, %s, %s, %s);",
+        (uai, p.nom.strip(), p.matiere_ecole.strip(), p.heures_poste)
     )
+    cur.execute("INSERT INTO matieres_etablissement (uai, nom) VALUES (%s, %s) ON CONFLICT DO NOTHING;", (uai, p.matiere_ecole.strip()))
     conn.commit()
     cur.close()
     conn.close()
@@ -229,17 +324,14 @@ def import_profs_ecole(uai: str, data: CSVImport):
         if len(row) < 2 or row[0].lower() == 'nom':
             continue
         nom = row[0].strip()
-        concours_nom = row[1].strip()
+        matiere_ecole = row[1].strip()
         heures = float(row[2].replace(',', '.')) if len(row) > 2 and row[2].strip() else 18.0
         
-        cur.execute("SELECT id FROM concours WHERE LOWER(intitule) = LOWER(%s) LIMIT 1;", (concours_nom,))
-        c_row = cur.fetchone()
-        c_id = c_row[0] if c_row else None
-        
         cur.execute(
-            "INSERT INTO professeurs_etablissement (uai, nom, concours_id, heures_poste) VALUES (%s, %s, %s, %s);",
-            (uai, nom, c_id, heures)
+            "INSERT INTO professeurs_etablissement (uai, nom, matiere_ecole, heures_poste) VALUES (%s, %s, %s, %s);",
+            (uai, nom, matiere_ecole, heures)
         )
+        cur.execute("INSERT INTO matieres_etablissement (uai, nom) VALUES (%s, %s) ON CONFLICT DO NOTHING;", (uai, matiere_ecole))
         ajoutes += 1
     conn.commit()
     cur.close()
@@ -256,26 +348,29 @@ def delete_prof_ecole(prof_id: int):
     conn.close()
     return {"status": "deleted"}
 
-# --- 3. BESOINS & ALERTES RECTORAT ---
+# --- 3. BESOINS, DÉTECTION AUTO & RÉSOLUTION DE MATIÈRE PAR LE RECTORAT ---
 @app.get("/api/besoins")
 def get_besoins():
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute("""
         SELECT b.id, b.uai, e.nom, b.prof_absent_id, COALESCE(pe.nom, 'Poste vacant'),
-               b.matiere_id, m.nom, float8(b.heures), b.date_debut, b.date_fin, b.motif,
+               b.matiere_id, m.nom, COALESCE(NULLIF(b.matiere_declaree, ''), m.nom, 'Matière non spécifiée'),
+               float8(b.heures), b.date_debut, b.date_fin, b.motif,
                b.vu_rectorat, ST_Y(e.geom), ST_X(e.geom)
         FROM besoins b
         JOIN etablissements e ON b.uai = e.uai
-        JOIN matieres m ON b.matiere_id = m.id
+        LEFT JOIN matieres m ON b.matiere_id = m.id
         LEFT JOIN professeurs_etablissement pe ON b.prof_absent_id = pe.id
         ORDER BY b.vu_rectorat ASC, b.date_declaration DESC;
     """)
     res = [{
         "id": r[0], "uai": r[1], "nom_etablissement": r[2], "prof_absent_id": r[3],
-        "prof_absent_nom": r[4], "matiere_id": r[5], "matiere": r[6], "heures": r[7],
-        "date_debut": str(r[8]), "date_fin": str(r[9]), "motif": r[10],
-        "vu_rectorat": r[11], "latitude": r[12], "longitude": r[13]
+        "prof_absent_nom": r[4], "matiere_id": r[5], "matiere_officielle": r[6],
+        "matiere_declaree": r[7], "matiere": r[6] if r[6] else r[7],
+        "reconnue": r[5] is not None,
+        "heures": r[8], "date_debut": str(r[9]), "date_fin": str(r[10]),
+        "motif": r[11], "vu_rectorat": r[12], "latitude": r[13], "longitude": r[14]
     } for r in cur.fetchall()]
     cur.close()
     conn.close()
@@ -285,14 +380,71 @@ def get_besoins():
 def creer_besoin(b: BesoinCreate):
     conn = get_db_connection()
     cur = conn.cursor()
+    mat_saisie = b.matiere_declaree.strip()
+    
+    # Détection automatique dans la base officielle du rectorat (insensible à la casse)
+    cur.execute("SELECT id, nom FROM matieres WHERE LOWER(TRIM(nom)) = LOWER(%s) LIMIT 1;", (mat_saisie,))
+    match = cur.fetchone()
+    matiere_id = match[0] if match else None
+    mat_label = match[1] if match else mat_saisie
+    
     cur.execute("""
-        INSERT INTO besoins (uai, prof_absent_id, matiere_id, heures, date_debut, date_fin, motif, vu_rectorat)
-        VALUES (%s, %s, %s, %s, %s, %s, %s, FALSE);
-    """, (b.uai, b.prof_absent_id, b.matiere_id, b.heures, b.date_debut, b.date_fin, b.motif))
+        INSERT INTO besoins (uai, prof_absent_id, matiere_id, matiere_declaree, heures, date_debut, date_fin, motif, vu_rectorat)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, FALSE);
+    """, (b.uai, b.prof_absent_id, matiere_id, mat_label, b.heures, b.date_debut, b.date_fin, b.motif))
     conn.commit()
     cur.close()
     conn.close()
-    return {"status": "ok"}
+    return {"status": "ok", "reconnue": matiere_id is not None}
+
+@app.post("/api/besoins/{besoin_id}/resoudre-matiere")
+def resoudre_matiere_besoin(besoin_id: int, req: ResoudreMatiereRequest):
+    conn = get_db_connection()
+    cur = conn.cursor()
+    
+    cur.execute("SELECT uai, matiere_declaree FROM besoins WHERE id = %s;", (besoin_id,))
+    b_row = cur.fetchone()
+    if not b_row:
+        cur.close()
+        conn.close()
+        raise HTTPException(status_code=404, detail="Besoin introuvable")
+    uai, ancienne_matiere = b_row[0], b_row[1]
+    
+    if req.mode == "associer":
+        # 1. Rattacher à une matière officielle existante
+        cur.execute("SELECT id, nom FROM matieres WHERE id = %s;", (req.matiere_id,))
+        m_row = cur.fetchone()
+        if not m_row:
+            raise HTTPException(status_code=400, detail="Matière officielle introuvable")
+        cible_id, nom_officiel = m_row[0], m_row[1]
+        
+        cur.execute("UPDATE besoins SET matiere_id = %s, matiere_declaree = %s WHERE id = %s;", (cible_id, nom_officiel, besoin_id))
+        
+        if req.corriger_ecole and ancienne_matiere:
+            # Met à jour le libellé dans l'école pour éviter que l'erreur ne se reproduise
+            cur.execute("DELETE FROM matieres_etablissement WHERE uai = %s AND LOWER(TRIM(nom)) = LOWER(TRIM(%s));", (uai, ancienne_matiere))
+            cur.execute("INSERT INTO matieres_etablissement (uai, nom) VALUES (%s, %s) ON CONFLICT DO NOTHING;", (uai, nom_officiel))
+            cur.execute("UPDATE professeurs_etablissement SET matiere_ecole = %s WHERE uai = %s AND LOWER(TRIM(matiere_ecole)) = LOWER(TRIM(%s));", (nom_officiel, uai, ancienne_matiere))
+            
+    elif req.mode == "creer":
+        # 2. Créer une nouvelle matière officielle et la lier aux concours cochés
+        nom_propre = req.nouveau_nom.strip()
+        cur.execute("INSERT INTO matieres (nom) VALUES (%s) ON CONFLICT (nom) DO UPDATE SET nom = EXCLUDED.nom RETURNING id;", (nom_propre,))
+        cible_id = cur.fetchone()[0]
+        
+        for cid in (req.concours_ids or []):
+            cur.execute("INSERT INTO concours_matieres (concours_id, matiere_id) VALUES (%s, %s) ON CONFLICT DO NOTHING;", (cid, cible_id))
+            
+        cur.execute("UPDATE besoins SET matiere_id = %s, matiere_declaree = %s WHERE id = %s;", (cible_id, nom_propre, besoin_id))
+        if ancienne_matiere and ancienne_matiere != nom_propre:
+            cur.execute("DELETE FROM matieres_etablissement WHERE uai = %s AND LOWER(TRIM(nom)) = LOWER(TRIM(%s));", (uai, ancienne_matiere))
+            cur.execute("INSERT INTO matieres_etablissement (uai, nom) VALUES (%s, %s) ON CONFLICT DO NOTHING;", (uai, nom_propre))
+            cur.execute("UPDATE professeurs_etablissement SET matiere_ecole = %s WHERE uai = %s AND LOWER(TRIM(matiere_ecole)) = LOWER(TRIM(%s));", (nom_propre, uai, ancienne_matiere))
+
+    conn.commit()
+    cur.close()
+    conn.close()
+    return {"status": "resolved"}
 
 @app.put("/api/besoins/marquer-vus")
 def marquer_besoins_vus():
@@ -389,7 +541,6 @@ def import_remplacants(data: CSVImport):
     reader = csv.reader(f, delimiter=';')
     ajoutes = 0
     for row in reader:
-        # Format attendu : Nom;Statut;Concours;UAI_ou_Nom_RAD;Quotite;Telephone;Email
         if len(row) < 4 or row[0].lower() == 'nom':
             continue
         nom, statut, concours_nom, rad = row[0].strip(), row[1].strip(), row[2].strip(), row[3].strip()
@@ -430,7 +581,7 @@ def supprimer_remplacant(remp_id: int):
     conn.close()
     return {"status": "deleted"}
 
-# --- 5. MATCHING SPATIAL & POLYVALENCE (DU PLUS PROCHE AU PLUS ÉLOIGNÉ) ---
+# --- 5. MATCHING SPATIAL & POLYVALENCE ---
 @app.get("/api/match")
 def match_remplacants(besoin_id: int):
     conn = get_db_connection()
@@ -438,7 +589,7 @@ def match_remplacants(besoin_id: int):
     
     cur.execute("SELECT uai, matiere_id, float8(heures) FROM besoins WHERE id = %s;", (besoin_id,))
     b = cur.fetchone()
-    if not b:
+    if not b or not b[1]:
         cur.close()
         conn.close()
         return []
@@ -473,9 +624,11 @@ def affecter(req: AffectationRequest):
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute("""
-        SELECT b.uai, b.matiere_id, b.heures, b.date_debut, b.date_fin, COALESCE(pe.nom, 'Poste vacant')
+        SELECT b.uai, b.matiere_id, b.heures, b.date_debut, b.date_fin,
+               COALESCE(pe.nom, 'Poste vacant'), COALESCE(m.nom, b.matiere_declaree)
         FROM besoins b
         LEFT JOIN professeurs_etablissement pe ON b.prof_absent_id = pe.id
+        LEFT JOIN matieres m ON b.matiere_id = m.id
         WHERE b.id = %s;
     """, (req.besoin_id,))
     b = cur.fetchone()
@@ -483,9 +636,9 @@ def affecter(req: AffectationRequest):
         raise HTTPException(status_code=404, detail="Besoin introuvable")
         
     cur.execute("""
-        INSERT INTO affectations (remplacant_id, uai, matiere_id, prof_remplace_nom, heures, date_debut, date_fin)
-        VALUES (%s, %s, %s, %s, %s, %s, %s);
-    """, (req.remplacant_id, b[0], b[1], b[5], b[2], b[3], b[4]))
+        INSERT INTO affectations (remplacant_id, uai, matiere_id, matiere_nom, prof_remplace_nom, heures, date_debut, date_fin)
+        VALUES (%s, %s, %s, %s, %s, %s, %s, %s);
+    """, (req.remplacant_id, b[0], b[1], b[6], b[5], b[2], b[3], b[4]))
     
     cur.execute("UPDATE remplacants SET heures_actuelles = heures_actuelles + %s WHERE id = %s;", (b[2], req.remplacant_id))
     cur.execute("DELETE FROM besoins WHERE id = %s;", (req.besoin_id,))
@@ -500,7 +653,8 @@ def get_affectations():
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute("""
-        SELECT a.id, a.remplacant_id, r.nom, a.uai, e.nom, COALESCE(m.nom, 'Matière'),
+        SELECT a.id, a.remplacant_id, r.nom, a.uai, e.nom,
+               COALESCE(m.nom, NULLIF(a.matiere_nom, ''), 'Matière'),
                a.prof_remplace_nom, float8(a.heures), a.date_debut, a.date_fin
         FROM affectations a
         JOIN remplacants r ON a.remplacant_id = r.id
@@ -551,7 +705,7 @@ def get_historique_remplacant(remp_id: int):
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute("""
-        SELECT e.nom, COALESCE(m.nom, '-'), a.prof_remplace_nom, float8(a.heures), a.date_debut, a.date_fin
+        SELECT e.nom, COALESCE(m.nom, NULLIF(a.matiere_nom, ''), '-'), a.prof_remplace_nom, float8(a.heures), a.date_debut, a.date_fin
         FROM affectations a
         JOIN etablissements e ON a.uai = e.uai
         LEFT JOIN matieres m ON a.matiere_id = m.id
