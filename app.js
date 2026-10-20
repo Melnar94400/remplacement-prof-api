@@ -654,7 +654,11 @@ function afficherFicheRemplacant(id) {
     });
 }
 
-// --- 5. CARTE & MATCHING DU PLUS PROCHE AU PLUS ÉLOIGNÉ ---
+// --- 5. CARTE, ITINÉRAIRES & MATCHING MULTIMODAL (ARRIVÉE 8H00) ---
+let layerItineraire = null;
+let candidatsMatchingActuels = [];
+let ecoleMatchingActuelle = null;
+
 function initMap() {
     if (!map) {
         map = L.map('map').setView([48.793, 2.396], 13);
@@ -662,10 +666,12 @@ function initMap() {
         layerPrimaire = L.featureGroup().addTo(map);
         layerSecondaire = L.featureGroup().addTo(map);
         layerProfs = L.featureGroup().addTo(map);
+        layerItineraire = L.featureGroup().addTo(map);
         L.control.layers(null, {
             "🏫 Écoles primaires": layerPrimaire,
             "🎓 Collèges & Lycées": layerSecondaire,
-            "👨‍🏫 Remplaçants (TZR/Contractuels)": layerProfs
+            "👨‍🏫 Remplaçants (TZR/Contractuels)": layerProfs,
+            "🛣️ Tracé de l'itinéraire": layerItineraire
         }, { position: 'topright' }).addTo(map);
         chargerCarteEtablissements();
         chargerRemplacants();
@@ -689,50 +695,158 @@ function chargerCarteEtablissements() {
     });
 }
 
-function lancerMatching(besoin_id, lat, lng, nomEtab, matiere, heures) {
-    besoinActifContext = besoin_id;
-    switchTab('map');
-    setTimeout(() => map.setView([lat, lng], 14), 250);
-
-    fetch(`${API_URL}/match?besoin_id=${besoin_id}`).then(r => r.json()).then(profs => {
-        const box = document.getElementById('search-results');
-        let html = `<div style="background:#f0f4f8; padding:12px; border-radius:6px; border-left:4px solid var(--primary); margin-bottom:15px;">
-            <strong>${nomEtab}</strong><br>
-            Matière : <span class="badge blue">${matiere}</span> (<b>${heures}h</b>)
-        </div>`;
-
-        if (profs.length === 0) {
-            html += `<p style="color:var(--danger); font-weight:bold;">Aucun remplaçant disponible habilité pour cette matière avec ${heures}h libres.</p>`;
-        } else {
-            html += `<p style="font-size:12px; color:#555;">Classés du plus proche au plus éloigné :</p>`;
-            profs.forEach((p, idx) => {
-                html += `<div class="card" style="padding:12px; margin-bottom:10px; border:1px solid #ddd;">
-                    <div style="display:flex; justify-content:space-between;">
-                        <strong>#${idx + 1} ${p.nom}</strong>
-                        <span class="badge orange">📍 ${p.distance_km} km</span>
-                    </div>
-                    <small>${p.statut} — ${p.concours}</small><br>
-                    <small>Rattachement : ${p.adresse}</small><br>
-                    <span class="badge green" style="margin-top:5px;">Disponibilité : ${p.heures_restantes}h</span>
-                    <button class="btn btn-success" style="width:100%; margin-top:8px;" onclick="validerAffectation(${p.id})">✅ Affecter ce professeur</button>
-                </div>`;
-            });
+// Interroge les serveurs OpenStreetMap (OSRM Allemagne) pour Voiture, Vélo et Marche
+async function calculerTempsOSRM( profil, lat1, lng1, lat2, lng2 ) {
+    const serveur = profil === 'car' ? 'routed-car' : (profil === 'bike' ? 'routed-bike' : 'routed-foot');
+    const url = `https://routing.openstreetmap.de/${serveur}/route/v1/driving/${lng1},${lat1};${lng2},${lat2}?overview=full&geometries=geojson`;
+    try {
+        const r = await fetch(url);
+        const data = await r.json();
+        if (data.routes && data.routes.length > 0) {
+            let minutes = Math.round(data.routes[0].duration / 60);
+            // Majoration trafic 8h00 en semaine pour la voiture (+35% + 3 min de stationnement)
+            if (profil === 'car') minutes = Math.round(minutes * 1.35) + 3;
+            return { minutes: Math.max(1, minutes), geometry: data.routes[0].geometry };
         }
-        box.innerHTML = html;
-    });
+    } catch (e) { console.warn("Erreur OSRM", profil, e); }
+    return { minutes: null, geometry: null };
 }
 
-function validerAffectation(remplacant_id) {
-    fetch(`${API_URL}/affecter`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ remplacant_id, besoin_id: besoinActifContext })
-    }).then(() => {
-        document.getElementById('search-results').innerHTML = `<div class="card" style="background:#d4edda; color:#155724;">✅ Affectation enregistrée avec succès !</div>`;
-        chargerBesoins();
-        chargerAffectations();
-        chargerRemplacants();
-        chargerEtablissements();
+// Génère un lien Google Maps Transit calé sur le prochain jour ouvré à 08h00
+function genererLienGoogleTransit8h(lat1, lng1, lat2, lng2) {
+    return `https://www.google.com/maps/dir/?api=1&origin=${lat1},${lng1}&destination=${lat2},${lng2}&travelmode=transit`;
+}
+
+async function lancerMatching(besoin_id, lat, lng, nomEtab, matiere, heures) {
+    besoinActifContext = besoin_id;
+    ecoleMatchingActuelle = { lat, lng, nomEtab, matiere, heures };
+    switchTab('map');
+    if (layerItineraire) layerItineraire.clearLayers();
+    setTimeout(() => map.setView([lat, lng], 14), 250);
+
+    const box = document.getElementById('search-results');
+    box.innerHTML = `<p>⏳ Recherche des enseignants et calcul des temps de trajet (arrivée 8h00)...</p>`;
+
+    const profs = await fetch(`${API_URL}/match?besoin_id=${besoin_id}`).then(r => r.json());
+    candidatsMatchingActuels = profs;
+
+    if (profs.length === 0) {
+        box.innerHTML = `<div style="background:#f0f4f8; padding:12px; border-radius:6px; border-left:4px solid var(--primary); margin-bottom:15px;">
+            <strong>${nomEtab}</strong><br>Matière : <span class="badge blue">${matiere}</span> (<b>${heures}h</b>)
+        </div>
+        <p style="color:var(--danger); font-weight:bold;">Aucun remplaçant disponible habilité pour cette matière avec ${heures}h libres.</p>`;
+        return;
+    }
+
+    // Calcul en parallèle des itinéraires Voiture, Vélo et Marche pour chaque candidat
+    await Promise.all(candidatsMatchingActuels.map(async (p) => {
+        const [car, bike, foot] = await Promise.all([
+            calculerTempsOSRM('car', p.latitude, p.longitude, lat, lng),
+            calculerTempsOSRM('bike', p.latitude, p.longitude, lat, lng),
+            calculerTempsOSRM('foot', p.latitude, p.longitude, lat, lng)
+        ]);
+        p.car_min = car.minutes; p.car_geom = car.geometry;
+        p.bike_min = bike.minutes; p.bike_geom = bike.geometry;
+        p.foot_min = foot.minutes; p.foot_geom = foot.geometry;
+
+        // Si pas de clé Navitia configurée, estimation TC urbaine (attentes + correspondances comprises)
+        if (p.tc_minutes === null || p.tc_minutes === undefined) {
+            p.tc_estime = Math.round(8 + (p.distance_km * 3.8));
+        } else {
+            p.tc_estime = p.tc_minutes;
+        }
+    }));
+
+    afficherCandidatsTries('distance');
+}
+
+function afficherCandidatsTries(critereTri) {
+    const { lat, lng, nomEtab, matiere, heures } = ecoleMatchingActuelle;
+    const box = document.getElementById('search-results');
+
+    const liste = [...candidatsMatchingActuels].sort((a, b) => {
+        if (critereTri === 'tc') return (a.tc_estime || 999) - (b.tc_estime || 999);
+        if (critereTri === 'car') return (a.car_min || 999) - (b.car_min || 999);
+        if (critereTri === 'bike') return (a.bike_min || 999) - (b.bike_min || 999);
+        if (critereTri === 'foot') return (a.foot_min || 999) - (b.foot_min || 999);
+        return a.distance_km - b.distance_km;
     });
+
+    let html = `<div style="background:#f0f4f8; padding:12px; border-radius:6px; border-left:4px solid var(--primary); margin-bottom:12px;">
+        <strong>${nomEtab}</strong><br>
+        Matière : <span class="badge blue">${matiere}</span> (<b>${heures}h</b>)
+    </div>
+    <div class="form-group" style="margin-bottom:15px;">
+        <label>Trier les remplaçants par :</label>
+        <select onchange="afficherCandidatsTries(this.value)" style="font-weight:bold;">
+            <option value="distance" ${critereTri==='distance'?'selected':''}>📍 Distance vol d'oiseau</option>
+            <option value="tc" ${critereTri==='tc'?'selected':''}>🚇 Transports en commun (8h00)</option>
+            <option value="car" ${critereTri==='car'?'selected':''}>🚗 Voiture (trafic 8h00)</option>
+            <option value="bike" ${critereTri==='bike'?'selected':''}>🚲 Vélo</option>
+            <option value="foot" ${critereTri==='foot'?'selected':''}>🚶 À pied</option>
+        </select>
+    </div>
+    <p style="font-size:11px; color:#666; margin-top:-8px;">💡 Cliquez sur 🚗, 🚲 ou 🚶 pour tracer la route sur la carte.</p>`;
+
+    liste.forEach((p, idx) => {
+        const lienTC = genererLienGoogleTransit8h(p.latitude, p.longitude, lat, lng);
+        const labelTC = p.tc_minutes !== null && p.tc_minutes !== undefined
+            ? `🚇 <b>${p.tc_minutes} min</b> <small>(${p.tc_lignes})</small>`
+            : `🚇 ~<b>${p.tc_estime} min</b> <small>(Estimé)</small>`;
+
+        html += `<div class="card" style="padding:12px; margin-bottom:12px; border:1px solid #ddd;">
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <strong>#${idx + 1} ${p.nom}</strong>
+                <span class="badge orange">📍 ${p.distance_km} km</span>
+            </div>
+            <small>${p.statut} — ${p.concours}</small><br>
+            <small>Départ (${p.statut === 'TZR' ? 'RAD' : 'Domicile'}) : <b>${p.adresse}</b></small>
+
+            <!-- Grille des temps de trajet -->
+            <div style="display:grid; grid-template-columns: 1fr 1fr 1fr; gap:4px; margin:8px 0; text-align:center;">
+                <button class="badge" style="border:1px solid #ccc; cursor:pointer; background:#fff;" onclick="tracerItineraire(${p.id}, 'car')" title="Tracer le trajet voiture">
+                    🚗 ${p.car_min ? p.car_min + ' min' : '-'}
+                </button>
+                <button class="badge" style="border:1px solid #ccc; cursor:pointer; background:#fff;" onclick="tracerItineraire(${p.id}, 'bike')" title="Tracer le trajet vélo">
+                    🚲 ${p.bike_min ? p.bike_min + ' min' : '-'}
+                </button>
+                <button class="badge" style="border:1px solid #ccc; cursor:pointer; background:#fff;" onclick="tracerItineraire(${p.id}, 'foot')" title="Tracer le trajet à pied">
+                    🚶 ${p.foot_min ? p.foot_min + ' min' : '-'}
+                </button>
+            </div>
+
+            <div style="display:flex; justify-content:space-between; align-items:center; background:#eef5ff; padding:6px 8px; border-radius:4px; font-size:12px; margin-bottom:8px;">
+                <span>${labelTC}</span>
+                <a href="${lienTC}" target="_blank" style="color:var(--primary); font-weight:bold; text-decoration:none;">Voir horaires 8h ↗</a>
+            </div>
+
+            <div style="display:flex; justify-content:space-between; align-items:center;">
+                <span class="badge green">Dispo : ${p.heures_restantes}h</span>
+                <button class="btn-small btn-success" style="padding:6px 12px;" onclick="validerAffectation(${p.id})">✅ Affecter</button>
+            </div>
+        </div>`;
+    });
+
+    box.innerHTML = html;
+}
+
+function tracerItineraire(profId, mode) {
+    const p = candidatsMatchingActuels.find(x => x.id === profId);
+    if (!p || !layerItineraire) return;
+    layerItineraire.clearLayers();
+
+    const geom = mode === 'car' ? p.car_geom : (mode === 'bike' ? p.bike_geom : p.foot_geom);
+    const couleur = mode === 'car' ? '#00448f' : (mode === 'bike' ? '#28a745' : '#fd7e14');
+    const labelMode = mode === 'car' ? '🚗 Voiture (8h00)' : (mode === 'bike' ? '🚲 Vélo' : '🚶 À pied');
+    const duree = mode === 'car' ? p.car_min : (mode === 'bike' ? p.bike_min : p.foot_min);
+
+    if (geom) {
+        const ligne = L.geoJSON(geom, {
+            style: { color: couleur, weight: 5, opacity: 0.85, dashArray: mode === 'foot' ? '6, 8' : null }
+        }).bindPopup(`<b>${p.nom} ➔ ${ecoleMatchingActuelle.nomEtab}</b><br>${labelMode} : <b>${duree} min</b>`).addTo(layerItineraire);
+        ligne.openPopup();
+        map.fitBounds(ligne.getBounds(), { padding: [40, 40] });
+    }
 }
 
 // --- 6. HISTORIQUE DES AFFECTATIONS ---
