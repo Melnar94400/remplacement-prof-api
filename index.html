@@ -5,65 +5,71 @@
     <title>Portail de Remplacement - Éducation Nationale</title>
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
-        :root { --primary: #00448f; --bg: #f4f7f6; --text: #333; --danger: #dc3545; --success: #28a745; }
-        body { margin: 0; display: flex; height: 100vh; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background-color: var(--bg); color: var(--text); }
+        :root { --primary: #00448f; --bg: #f4f7f6; --text: #2c3e50; --danger: #dc3545; --success: #28a745; --warning: #ffc107; }
+        body { margin: 0; display: flex; height: 100vh; font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: var(--bg); color: var(--text); overflow: hidden; }
         
-        /* Menu Rectorat caché par défaut */
-        .main-nav { width: 85px; background: var(--primary); display: none; flex-direction: column; align-items: center; padding-top: 20px; z-index: 2000; box-shadow: 2px 0 5px rgba(0,0,0,0.2); }
-        .nav-item { color: white; margin-bottom: 20px; cursor: pointer; text-align: center; font-size: 11px; opacity: 0.6; transition: 0.2s; text-transform: uppercase; font-weight: bold; width: 100%; }
-        .nav-item:hover, .nav-item.active { opacity: 1; background: rgba(255,255,255,0.1); padding: 5px 0; }
-        .nav-item .icon { font-size: 26px; display: block; margin-bottom: 5px; }
-        
+        /* Navigation latérale Rectorat */
+        .main-nav { width: 95px; background: var(--primary); display: none; flex-direction: column; align-items: center; padding-top: 15px; z-index: 2000; box-shadow: 2px 0 5px rgba(0,0,0,0.2); }
+        .nav-item { color: white; margin-bottom: 18px; cursor: pointer; text-align: center; font-size: 11px; opacity: 0.7; transition: 0.2s; font-weight: bold; width: 100%; padding: 8px 0; position: relative; }
+        .nav-item:hover, .nav-item.active { opacity: 1; background: rgba(255,255,255,0.15); }
+        .nav-item .icon { font-size: 24px; display: block; margin-bottom: 4px; }
+        .notif-badge { position: absolute; top: 2px; right: 12px; background: var(--danger); color: white; border-radius: 50%; padding: 2px 6px; font-size: 10px; display: none; }
+
         .view-container { flex: 1; display: none; height: 100%; overflow: hidden; }
         .view-container.active { display: flex; flex-direction: column; }
+        .data-layout { padding: 25px; overflow-y: auto; width: 100%; box-sizing: border-box; }
         
-        /* Layout Carte & Données */
-        .map-layout { display: flex; height: 100%; width: 100%; }
-        #sidebar-action { width: 350px; background: white; padding: 20px; overflow-y: auto; box-shadow: 2px 0 5px rgba(0,0,0,0.05); z-index: 1000; }
-        #map { flex: 1; height: 100%; z-index: 1; }
-        .data-layout { padding: 30px; overflow-y: auto; width: 100%; box-sizing: border-box; }
+        /* En-têtes, Cartes et Boutons */
+        .header-title { font-size: 22px; margin-top: 0; border-bottom: 2px solid #ddd; padding-bottom: 12px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
+        .card { background: white; border-radius: 8px; padding: 20px; box-shadow: 0 2px 5px rgba(0,0,0,0.06); margin-bottom: 20px; }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
+        .grid-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 15px; }
+        .form-group { margin-bottom: 12px; }
+        .form-group label { display: block; font-size: 12px; font-weight: bold; margin-bottom: 5px; color: #555; }
+        .form-group input, .form-group select, .form-group textarea { width: 100%; padding: 8px 10px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-family: inherit; }
         
-        .header-title { font-size: 24px; margin-top: 0; border-bottom: 2px solid #ddd; padding-bottom: 10px; margin-bottom: 20px; display: flex; justify-content: space-between; align-items: center; }
-        .card { background: white; border-radius: 8px; padding: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.05); margin-bottom: 20px; }
-        .grid-form { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; }
-        .form-group { margin-bottom: 10px; }
-        .form-group label { display: block; font-size: 12px; font-weight: bold; margin-bottom: 4px; color: #555; }
-        .form-group input, .form-group select { width: 100%; padding: 8px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box; font-family: inherit;}
-        
-        .btn { background: var(--success); color: white; border: none; padding: 10px 15px; cursor: pointer; border-radius: 4px; font-weight: bold; }
+        .btn { background: var(--primary); color: white; border: none; padding: 9px 14px; cursor: pointer; border-radius: 4px; font-weight: bold; font-size: 13px; }
         .btn:hover { opacity: 0.9; }
-        .btn-action { background: var(--primary); }
-        .btn-small { padding: 5px 8px; font-size: 11px; margin-right: 5px; border-radius: 3px; cursor: pointer; border: none; color: white; }
-        .btn-edit { background: #ffc107; color: #000; }
-        .btn-delete { background: var(--danger); }
-        .btn-info { background: #17a2b8; }
+        .btn-success { background: var(--success); }
+        .btn-danger { background: var(--danger); }
+        .btn-warning { background: var(--warning); color: #000; }
+        .btn-small { padding: 5px 9px; font-size: 11px; margin-right: 4px; border-radius: 4px; cursor: pointer; border: none; color: white; font-weight: bold; }
         
-        table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; box-shadow: 0 2px 4px rgba(0,0,0,0.05); }
-        th, td { text-align: left; padding: 12px 15px; border-bottom: 1px solid #eee; font-size: 14px; }
-        th { background-color: var(--primary); color: white; font-weight: normal; }
+        /* Tableaux & Badges */
+        table { width: 100%; border-collapse: collapse; background: white; border-radius: 8px; overflow: hidden; }
+        th, td { text-align: left; padding: 11px 14px; border-bottom: 1px solid #eee; font-size: 13px; }
+        th { background-color: var(--primary); color: white; font-weight: 600; }
         tr:hover { background-color: #f8f9fa; }
-        .badge { background: #e9ecef; color: #333; padding: 4px 8px; border-radius: 12px; font-size: 11px; font-weight: bold; white-space: nowrap; }
+        tr.unseen-alert { background-color: #fff3cd; }
+        .badge { background: #e9ecef; color: #333; padding: 4px 8px; border-radius: 12px; font-size: 11px; font-weight: bold; display: inline-block; margin: 2px; }
         .badge.green { background: #d4edda; color: #155724; }
         .badge.red { background: #f8d7da; color: #721c24; }
         .badge.blue { background: #cce5ff; color: #004085; }
-        
-        /* Modals & Autocomplete */
-        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 3000; justify-content: center; align-items: center; }
-        .modal-content { background: white; padding: 25px; border-radius: 8px; width: 600px; max-width: 90%; position: relative; }
-        .modal-close { position: absolute; top: 15px; right: 15px; cursor: pointer; font-size: 20px; font-weight: bold; color: #666; border: none; background: transparent;}
-        .autocomplete-wrapper { position: relative; width: 100%; }
-        .autocomplete-items { position: absolute; border: 1px solid #d4d4d4; border-bottom: none; border-top: none; z-index: 99; top: 100%; left: 0; right: 0; max-height: 200px; overflow-y: auto; background-color: white; box-shadow: 0 4px 6px rgba(0,0,0,0.1); }
-        .autocomplete-items div { padding: 10px; cursor: pointer; border-bottom: 1px solid #d4d4d4; font-size: 13px; }
-        .autocomplete-items div:hover { background-color: #e9e9e9; }
-        
-        /* NOUVEAU : Page d'accueil Portail */
-        .portail-container { display: flex; flex-direction: column; align-items: center; justify-content: center; height: 100%; width: 100%; background: linear-gradient(135deg, #00448f 0%, #002244 100%); color: white; }
-        .portail-box { background: white; color: #333; padding: 40px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.2); text-align: center; width: 500px; max-width: 90%; }
-        .portail-btn { display: block; width: 100%; padding: 15px; margin: 15px 0; font-size: 16px; font-weight: bold; border-radius: 8px; cursor: pointer; border: 2px solid transparent; transition: 0.2s; }
-        .btn-ecole { background: #f8f9fa; color: var(--primary); border-color: var(--primary); }
-        .btn-ecole:hover { background: var(--primary); color: white; }
+        .badge.orange { background: #ffeeba; color: #856404; }
+
+        /* Carte */
+        .map-layout { display: flex; height: 100%; width: 100%; }
+        #sidebar-action { width: 380px; background: white; padding: 20px; overflow-y: auto; box-shadow: 2px 0 5px rgba(0,0,0,0.08); z-index: 1000; }
+        #map { flex: 1; height: 100%; z-index: 1; }
+
+        /* Portail d'accueil */
+        .portail-container { display: flex; align-items: center; justify-content: center; height: 100%; width: 100%; background: linear-gradient(135deg, #00448f 0%, #002244 100%); }
+        .portail-box { background: white; padding: 35px; border-radius: 12px; box-shadow: 0 10px 25px rgba(0,0,0,0.25); text-align: center; width: 480px; max-width: 90%; }
+        .portail-btn { display: block; width: 100%; padding: 14px; margin: 12px 0; font-size: 15px; font-weight: bold; border-radius: 8px; cursor: pointer; border: 2px solid var(--primary); transition: 0.2s; }
+        .btn-ecole { background: white; color: var(--primary); }
+        .btn-ecole:hover { background: #f0f4f8; }
         .btn-rectorat { background: var(--primary); color: white; }
-        .btn-rectorat:hover { background: #002244; }
+
+        /* Fenêtres Modales */
+        .modal-overlay { display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.55); z-index: 3000; justify-content: center; align-items: center; }
+        .modal-content { background: white; padding: 25px; border-radius: 8px; width: 650px; max-width: 92%; max-height: 88vh; overflow-y: auto; position: relative; box-shadow: 0 5px 20px rgba(0,0,0,0.3); }
+        .modal-close { position: absolute; top: 12px; right: 15px; cursor: pointer; font-size: 22px; font-weight: bold; color: #666; border: none; background: none; }
+        
+        /* Autocomplete */
+        .autocomplete-wrapper { position: relative; width: 100%; }
+        .autocomplete-items { position: absolute; border: 1px solid #ccc; z-index: 99; top: 100%; left: 0; right: 0; max-height: 200px; overflow-y: auto; background: white; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }
+        .autocomplete-items div { padding: 9px 12px; cursor: pointer; border-bottom: 1px solid #eee; font-size: 13px; text-align: left; }
+        .autocomplete-items div:hover { background-color: #f0f4f8; }
     </style>
 </head>
 <body>
@@ -71,435 +77,349 @@
     <!-- MENU RECTORAT -->
     <div class="main-nav" id="menu-rectorat">
         <div class="nav-item" onclick="deconnexion()"><span class="icon">🚪</span>Quitter</div>
-        <div class="nav-item active" id="nav-besoins" onclick="switchTab('besoins')"><span class="icon">📋</span>Besoins</div>
+        <div class="nav-item active" id="nav-besoins" onclick="switchTab('besoins')">
+            <span class="icon">🔔</span>Besoins
+            <span class="notif-badge" id="alert-badge">0</span>
+        </div>
+        <div class="nav-item" id="nav-etabs" onclick="switchTab('etabs')"><span class="icon">🏫</span>Écoles</div>
+        <div class="nav-item" id="nav-profs" onclick="switchTab('profs')"><span class="icon">👨‍🏫</span>Vivier RH</div>
+        <div class="nav-item" id="nav-referentiel" onclick="switchTab('referentiel')"><span class="icon">⚙️</span>Matières</div>
         <div class="nav-item" id="nav-affectations" onclick="switchTab('affectations')"><span class="icon">📜</span>Historique</div>
-        <div class="nav-item" id="nav-profs" onclick="switchTab('profs')"><span class="icon">👨‍🏫</span>RH Profs</div>
         <div class="nav-item" id="nav-map" onclick="switchTab('map')"><span class="icon">🗺️</span>Carte</div>
     </div>
 
-    <!-- VUE 0 : PORTAIL D'ACCUEIL -->
+    <!-- 0. PORTAIL D'ACCUEIL & CONNEXION -->
     <div id="view-accueil" class="view-container active">
         <div class="portail-container">
             <div class="portail-box">
-                <img src="https://upload.wikimedia.org/wikipedia/fr/thumb/3/3f/Minist%C3%A8re_de_l%27%C3%89ducation_nationale.svg/1024px-Minist%C3%A8re_de_l%27%C3%89ducation_nationale.svg.png" alt="Logo" style="height: 80px; margin-bottom: 20px;">
-                <h2 style="margin-top:0;">Portail de Remplacement</h2>
-                <p style="color: #666; margin-bottom: 30px;">Sélectionnez votre espace de connexion pour accéder à vos services.</p>
+                <div style="font-size: 42px; margin-bottom: 10px;">🇫🇷</div>
+                <h2 style="margin-top:0; color: var(--primary);">Portail de Gestion des Remplacements</h2>
+                <p style="color: #666; font-size: 14px; margin-bottom: 25px;">Choisissez votre portail de connexion</p>
                 
-                <button class="portail-btn btn-ecole" onclick="loginEcole()">🏫 Espace Établissement<br><small style="font-weight:normal;">Déclarer un besoin de remplacement</small></button>
-                <button class="portail-btn btn-rectorat" onclick="loginRectorat()">🏢 Espace Rectorat<br><small style="font-weight:normal;">Gestion RH et Affectations</small></button>
+                <button class="portail-btn btn-ecole" onclick="ouvrirModal('modal-login-ecole')">
+                    🏫 Connexion Chef d'Établissement<br>
+                    <small style="font-weight:normal;">Gérer mes professeurs en poste et déclarer une absence</small>
+                </button>
+                <button class="portail-btn btn-rectorat" onclick="loginRectorat()">
+                    🏢 Connexion Espace Rectorat<br>
+                    <small style="font-weight:normal;">Alertes, Vivier TZR/Contractuels, Affectations et Référentiel</small>
+                </button>
             </div>
         </div>
     </div>
 
-    <!-- VUE 0.5 : ESPACE ÉTABLISSESEMENT (Nouveau) -->
+    <!-- 1. ESPACE ÉTABLISSEMENT (COMPTE ÉCOLE) -->
     <div id="view-espace-ecole" class="view-container">
-        <div class="data-layout" style="max-width: 800px; margin: 0 auto;">
+        <div class="data-layout" style="max-width: 1050px; margin: 0 auto;">
             <div class="header-title">
-                Mon Établissement
-                <button class="btn btn-delete" onclick="deconnexion()">Déconnexion</button>
-            </div>
-            
-            <div class="card">
-                <h3 style="margin-top:0;">Identifiez votre établissement</h3>
-                <div class="autocomplete-wrapper">
-                    <input type="text" id="ecole-search" placeholder="Tapez le nom de votre collège ou lycée..." oninput="chercherEtablissementLocal(this.value)">
-                    <div id="ecole-autocomplete-list" class="autocomplete-items"></div>
+                <div>
+                    <span id="ecole-titre-nom" style="color: var(--primary);"></span>
+                    <span id="ecole-titre-uai" class="badge blue"></span>
                 </div>
-                <input type="hidden" id="ecole-active-uai">
-                <h4 id="ecole-active-nom" style="color: var(--primary); margin-top: 15px;"></h4>
+                <button class="btn btn-danger" onclick="deconnexion()">🚪 Déconnexion</button>
             </div>
 
-            <div id="ecole-actions" style="display: none;">
+            <div class="grid-2">
+                <!-- Colonne Gauche : Professeurs en poste -->
                 <div class="card">
-                    <h3 style="margin-top:0;">Déclarer un nouveau besoin</h3>
-                    <div class="grid-form">
-                        <div class="form-group"><label>Matière</label><select id="ecole-besoin-matiere"></select></div>
-                        <div class="form-group"><label>Heures hebdo</label><input type="number" id="ecole-besoin-heures" value="18" step="0.5"></div>
+                    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:15px;">
+                        <h3 style="margin:0;">👨‍🏫 Professeurs en poste</h3>
+                        <div>
+                            <button class="btn-small btn" onclick="ouvrirModal('modal-add-prof-ecole')">➕ Ajouter</button>
+                            <button class="btn-small btn-success" onclick="ouvrirModal('modal-import-prof-ecole')">📥 Import CSV</button>
+                        </div>
+                    </div>
+                    <table>
+                        <thead><tr><th>Nom</th><th>Concours / Titre</th><th>Poste</th><th></th></tr></thead>
+                        <tbody id="ecole-table-profs"></tbody>
+                    </table>
+                </div>
+
+                <!-- Colonne Droite : Déclarer l'absence d'un prof -->
+                <div class="card">
+                    <h3 style="margin-top:0;">🚨 Déclarer une absence / un besoin</h3>
+                    <div class="form-group">
+                        <label>Professeur absent (en poste dans l'établissement)</label>
+                        <select id="ecole-besoin-prof" onchange="autoRemplirHeuresProf()"></select>
+                    </div>
+                    <div class="form-group">
+                        <label>Matière à assurer devant les élèves</label>
+                        <select id="ecole-besoin-matiere"></select>
+                    </div>
+                    <div class="grid-2">
+                        <div class="form-group"><label>Volume horaire (h/sem)</label><input type="number" id="ecole-besoin-heures" value="18" step="0.5"></div>
+                        <div class="form-group"><label>Motif</label><input type="text" id="ecole-besoin-motif" value="Congé maladie"></div>
                         <div class="form-group"><label>Date de début</label><input type="date" id="ecole-besoin-debut"></div>
                         <div class="form-group"><label>Date de fin</label><input type="date" id="ecole-besoin-fin"></div>
                     </div>
-                    <button class="btn btn-action" onclick="ecoleAjouterBesoin()" style="width: 100%; margin-top: 10px;">Transmettre au rectorat</button>
+                    <button class="btn btn-success" style="width:100%; margin-top:8px;" onclick="ecoleDeclarerBesoin()">📡 Envoyer l'alerte au Rectorat</button>
                 </div>
+            </div>
 
-                <div class="card" style="padding:0;">
-                    <h3 style="padding: 20px 20px 0 20px; margin-top:0;">État de nos demandes</h3>
-                    <table>
-                        <thead><tr><th>Discipline</th><th>Période</th><th>Heures</th><th>Statut</th></tr></thead>
-                        <tbody id="ecole-table-besoins"></tbody>
-                    </table>
-                </div>
+            <div class="card" style="padding:0;">
+                <h3 style="padding: 18px 20px 0 20px; margin:0;">📋 Suivi des demandes de remplacement de l'établissement</h3>
+                <table style="margin-top:12px;">
+                    <thead><tr><th>Professeur remplacé</th><th>Matière</th><th>Période</th><th>Volume</th><th>Statut</th></tr></thead>
+                    <tbody id="ecole-table-suivi"></tbody>
+                </table>
             </div>
         </div>
     </div>
 
-    <!-- VUES RECTORAT (Besoins, Affectations, Profs, Carte) -->
-    <!-- (Identiques à la version V8, juste regroupées) -->
+    <!-- 2. RECTORAT : BESOINS & ALERTES -->
     <div id="view-besoins" class="view-container">
         <div class="data-layout">
-            <h2 class="header-title">Besoins remontés par les établissements</h2>
+            <div class="header-title">
+                <span>🔔 Alertes & Besoins déclarés par les établissements</span>
+                <button class="btn" onclick="marquerAlertesLues()">✔️ Marquer les alertes comme vues</button>
+            </div>
             <div class="card" style="padding: 0;">
                 <table>
-                    <thead><tr><th>Établissement</th><th>Discipline</th><th>Période</th><th>Heures</th><th>Actions</th></tr></thead>
+                    <thead><tr><th>Statut</th><th>Établissement</th><th>Professeur absent</th><th>Matière demandée</th><th>Période</th><th>Heures</th><th>Action</th></tr></thead>
                     <tbody id="table-besoins-body"></tbody>
                 </table>
             </div>
         </div>
     </div>
 
-    <div id="view-affectations" class="view-container">
+    <!-- 3. RECTORAT : FICHES ÉTABLISSEMENTS -->
+    <div id="view-etabs" class="view-container">
         <div class="data-layout">
-            <h2 class="header-title">Gestion des affectations en cours et passées</h2>
+            <div class="header-title">
+                <span>🏫 Annuaire & Fiches des Établissements</span>
+                <input type="text" placeholder="🔍 Filtrer un établissement..." style="padding:8px; width:260px;" oninput="filtrerTableEtabs(this.value)">
+            </div>
             <div class="card" style="padding: 0;">
                 <table>
-                    <thead><tr><th>Professeur</th><th>Établissement</th><th>Discipline</th><th>Période</th><th>Volume</th><th>Actions</th></tr></thead>
-                    <tbody id="table-affectations-body"></tbody>
+                    <thead><tr><th>UAI</th><th>Nom de l'établissement</th><th>Catégorie</th><th>Profs en poste</th><th>Besoins actifs</th><th>Actions</th></tr></thead>
+                    <tbody id="table-etabs-body"></tbody>
                 </table>
             </div>
         </div>
     </div>
 
+    <!-- 4. RECTORAT : VIVIER TZR & CONTRACTUELS -->
     <div id="view-profs" class="view-container">
         <div class="data-layout">
-            <h2 class="header-title">Base de données Enseignants (TZR & Contractuels)</h2>
-            <div class="card">
-                <h4 style="margin-top: 0;" id="form-title">Créer une nouvelle fiche enseignant</h4>
-                <input type="hidden" id="edit-id" value="">
-                <div class="grid-form">
-                    <div class="form-group"><label>Nom complet</label><input type="text" id="add-nom" placeholder="Ex: M. Curie"></div>
-                    <div class="form-group"><label>Discipline (Concours)</label><select id="add-discipline"></select></div>
-                    <div class="form-group"><label>Statut</label><select id="add-statut" onchange="updateFormUI()"><option value="TZR">TZR</option><option value="Contractuel">Contractuel</option></select></div>
-                    <div class="form-group"><label>Corps</label><select id="add-corps"><option value="Certifié">Certifié (18h)</option><option value="Agrégé">Agrégé (15h)</option><option value="Contractuel">Contractuel (18h)</option></select></div>
-                    <div class="form-group"><label>Téléphone</label><input type="tel" id="add-telephone" placeholder="06 12 34 56 78"></div>
-                    <div class="form-group"><label>Email</label><input type="email" id="add-email" placeholder="prenom.nom@ac-creteil.fr"></div>
-                    <div class="form-group"><label>Quotité (%)</label><input type="number" id="add-quotite" value="100"></div>
-                    <div class="form-group"><label>Heures déjà pourvues</label><input type="number" id="add-heures-actuelles" value="0" step="0.5"></div>
-                </div>
-                <div class="form-group" style="margin-top: 10px;">
-                    <label id="label-adresse">Établissement de rattachement (RAD)</label>
-                    <div class="autocomplete-wrapper"><input type="text" id="add-adresse" placeholder="Tapez le nom de l'établissement..." autocomplete="off" oninput="chercherAdresseOuEtablissement(this.value)"><div id="autocomplete-list" class="autocomplete-items"></div></div>
-                </div>
-                <div class="grid-form" style="display: none;"><div class="form-group"><input type="text" id="add-lat" readonly></div><div class="form-group"><input type="text" id="add-lng" readonly></div></div>
-                <div style="display: flex; gap: 10px; margin-top: 15px;">
-                    <button class="btn" id="btn-save" onclick="sauvegarderProf()">💾 Enregistrer la fiche</button>
-                    <button class="btn" style="background: #6c757d; display: none;" id="btn-cancel" onclick="resetForm()">❌ Annuler</button>
+            <div class="header-title">
+                <span>👨‍🏫 Vivier des Remplaçants (TZR & Contractuels)</span>
+                <div>
+                    <button class="btn" onclick="ouvrirModalRemplacant()">➕ Ajouter un remplaçant</button>
+                    <button class="btn btn-success" onclick="ouvrirModal('modal-import-remplacants')">📥 Importer CSV</button>
                 </div>
             </div>
             <div class="card" style="padding:0;">
                 <table>
-                    <thead><tr><th>Nom & Contact</th><th>Statut</th><th>Discipline</th><th>Rattachement</th><th>Disponibilité</th><th>Actions</th></tr></thead>
+                    <thead><tr><th>Nom & Contact</th><th>Statut</th><th>Concours & Matières habilitées</th><th>Rattachement / Domicile</th><th>Disponibilité</th><th>Actions</th></tr></thead>
                     <tbody id="table-profs-body"></tbody>
                 </table>
             </div>
         </div>
     </div>
 
+    <!-- 5. RECTORAT : RÉFÉRENTIEL CONCOURS ↔ MATIÈRES -->
+    <div id="view-referentiel" class="view-container">
+        <div class="data-layout">
+            <div class="header-title">
+                <span>⚙️ Référentiel évolutif : Concours & Polyvalence des Matières</span>
+                <div>
+                    <button class="btn" onclick="ouvrirModal('modal-add-concours')">➕ Nouveau Concours</button>
+                    <button class="btn btn-success" onclick="ouvrirModal('modal-add-matiere')">➕ Nouvelle Matière</button>
+                </div>
+            </div>
+            <div class="card">
+                <h4 style="margin-top:0;">Associer une matière enseignable à un concours (ex: Sciences, SNT, PSE...)</h4>
+                <div class="grid-3" style="align-items: end;">
+                    <div class="form-group" style="margin:0;"><label>Concours (CAPES, Agrégation, CAPLP, CAPET...)</label><select id="ref-select-concours"></select></div>
+                    <div class="form-group" style="margin:0;"><label>Matière pouvant être enseignée</label><select id="ref-select-matiere"></select></div>
+                    <button class="btn btn-success" onclick="ajouterLiaisonConcoursMatiere()">🔗 Autoriser cet enseignement</button>
+                </div>
+            </div>
+            <div class="card" style="padding:0;">
+                <table>
+                    <thead><tr><th>Concours / Titre de recrutement</th><th>ORS (Heures)</th><th>Matières associées (cliquez sur × pour retirer)</th></tr></thead>
+                    <tbody id="table-referentiel-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- 6. RECTORAT : HISTORIQUE DES AFFECTATIONS -->
+    <div id="view-affectations" class="view-container">
+        <div class="data-layout">
+            <h2 class="header-title">📜 Historique des affectations</h2>
+            <div class="card" style="padding: 0;">
+                <table>
+                    <thead><tr><th>Remplaçant</th><th>Établissement</th><th>Prof remplacé</th><th>Matière</th><th>Période</th><th>Volume</th><th>Actions</th></tr></thead>
+                    <tbody id="table-affectations-body"></tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- 7. RECTORAT : CARTE & MATCHING PAR DISTANCE -->
     <div id="view-map" class="view-container">
         <div class="map-layout">
             <div id="sidebar-action">
-                <h3 style="margin-top: 0; color: var(--primary);">Affectation spatiale</h3>
-                <p style="font-size: 13px; color: #666;">Les professeurs ayant suffisamment d'heures s'afficheront ici en fonction de la distance kilométrique.</p>
-                <div id="search-results"></div>
+                <h3 style="margin-top: 0; color: var(--primary);">🗺️ Recherche par proximité</h3>
+                <div id="search-results">
+                    <p style="font-size: 13px; color: #666;">Cliquez sur <b>« 🗺️ Trouver un remplaçant »</b> depuis l'onglet Besoins pour classer les enseignants compatibles du plus proche au plus éloigné.</p>
+                </div>
             </div>
             <div id="map"></div>
         </div>
     </div>
 
-    <!-- MODALS (Fiche Prof, Edit Affectation) identiques à la V8 -->
-    <div id="modal-prof" class="modal-overlay">
-        <div class="modal-content">
-            <button class="modal-close" onclick="fermerModal('modal-prof')">×</button>
-            <h2 id="modal-prof-nom" style="margin-top:0; color: var(--primary);"></h2>
-            <div style="display:flex; gap:10px; margin-bottom:15px;" id="modal-prof-badges"></div>
-            <p>📧 <span id="modal-prof-email"></span> | 📞 <span id="modal-prof-tel"></span></p>
-            <hr style="border:0; border-top:1px solid #ddd; margin:20px 0;">
-            <h4 style="margin-bottom: 10px;">Historique des affectations</h4>
-            <div style="max-height: 250px; overflow-y:auto;">
-                <table style="font-size: 12px;"><thead><tr><th>Période</th><th>Établissement</th><th>Discipline</th><th>Heures</th></tr></thead><tbody id="modal-prof-historique"></tbody></table>
+    <!-- ================= FENÊTRES MODALES ================= -->
+
+    <!-- Modal 1 : Connexion Compte École -->
+    <div id="modal-login-ecole" class="modal-overlay">
+        <div class="modal-content" style="width: 440px;">
+            <button class="modal-close" onclick="fermerModal('modal-login-ecole')">×</button>
+            <h3 style="margin-top:0; color:var(--primary);">🏫 Connexion Établissement</h3>
+            <div class="form-group">
+                <label>Recherchez votre établissement (Nom ou UAI)</label>
+                <div class="autocomplete-wrapper">
+                    <input type="text" id="login-ecole-search" placeholder="Ex: Collège Danielle Casanova..." oninput="chercherEcoleLogin(this.value)">
+                    <div id="login-ecole-list" class="autocomplete-items"></div>
+                </div>
+                <input type="hidden" id="login-ecole-uai">
+                <div id="login-ecole-selected" style="margin-top:8px; font-weight:bold; color:var(--primary);"></div>
             </div>
+            <div class="form-group">
+                <label>Mot de passe établissement <small>(Par défaut : 1234)</small></label>
+                <input type="password" id="login-ecole-mdp" value="1234">
+            </div>
+            <button class="btn btn-success" style="width:100%; margin-top:10px;" onclick="validerLoginEcole()">Se connecter à l'établissement</button>
         </div>
     </div>
-    
+
+    <!-- Modal 2 : Ajouter un prof en poste dans l'école -->
+    <div id="modal-add-prof-ecole" class="modal-overlay">
+        <div class="modal-content" style="width: 420px;">
+            <button class="modal-close" onclick="fermerModal('modal-add-prof-ecole')">×</button>
+            <h3 style="margin-top:0;">➕ Ajouter un professeur en poste</h3>
+            <div class="form-group"><label>Nom et Prénom</label><input type="text" id="pe-nom" placeholder="Ex: Mme Martin"></div>
+            <div class="form-group"><label>Concours / Discipline de poste</label><select id="pe-concours"></select></div>
+            <div class="form-group"><label>Heures sur le poste (h/sem)</label><input type="number" id="pe-heures" value="18" step="0.5"></div>
+            <button class="btn btn-success" style="width:100%;" onclick="ecoleAjouterProf()">Enregistrer</button>
+        </div>
+    </div>
+
+    <!-- Modal 3 : Importer CSV de profs en poste dans l'école -->
+    <div id="modal-import-prof-ecole" class="modal-overlay">
+        <div class="modal-content">
+            <button class="modal-close" onclick="fermerModal('modal-import-prof-ecole')">×</button>
+            <h3 style="margin-top:0;">📥 Importer la liste des professeurs de l'école (CSV)</h3>
+            <p style="font-size:12px; color:#555;">Format attendu (séparateur point-virgule <code>;</code>) : <code>Nom;Intitulé du concours;Heures</code></p>
+            <textarea id="csv-prof-ecole" rows="7" placeholder="M. Dupont;CAPES Physique-Chimie;18&#10;Mme Durand;CAPES SVT;18&#10;M. Petit;Agrégation Mathématiques;15"></textarea>
+            <button class="btn btn-success" style="width:100%; margin-top:10px;" onclick="ecoleImporterCSV()">Importer les professeurs</button>
+        </div>
+    </div>
+
+    <!-- Modal 4 : Fiche détaillée d'un Établissement (Vue Rectorat) -->
+    <div id="modal-fiche-etab" class="modal-overlay">
+        <div class="modal-content" style="width: 720px;">
+            <button class="modal-close" onclick="fermerModal('modal-fiche-etab')">×</button>
+            <h2 id="fe-nom" style="margin-top:0; color:var(--primary);"></h2>
+            <p id="fe-meta" style="color:#666; font-size:13px;"></p>
+            <h4>👨‍🏫 Professeurs en poste dans cet établissement</h4>
+            <table><thead><tr><th>Nom</th><th>Concours</th><th>Heures</th></tr></thead><tbody id="fe-profs"></tbody></table>
+            <h4 style="margin-top:20px;">🚨 Besoins en attente</h4>
+            <table><thead><tr><th>Prof absent</th><th>Matière</th><th>Période</th><th>Heures</th></tr></thead><tbody id="fe-besoins"></tbody></table>
+        </div>
+    </div>
+
+    <!-- Modal 5 : Ajouter / Modifier un Remplaçant (TZR / Contractuel) -->
+    <div id="modal-remplacant" class="modal-overlay">
+        <div class="modal-content">
+            <button class="modal-close" onclick="fermerModal('modal-remplacant')">×</button>
+            <h3 style="margin-top:0;" id="form-remp-title">➕ Fiche Remplaçant (TZR / Contractuel)</h3>
+            <input type="hidden" id="edit-remp-id">
+            <div class="grid-2">
+                <div class="form-group"><label>Nom complet</label><input type="text" id="add-nom" placeholder="Ex: M. Curie"></div>
+                <div class="form-group"><label>Statut</label><select id="add-statut" onchange="updateFormRemplacantUI()"><option value="TZR">TZR</option><option value="Contractuel">Contractuel</option></select></div>
+                <div class="form-group"><label>Concours / Titre</label><select id="add-concours"></select></div>
+                <div class="form-group"><label>Quotité (%)</label><input type="number" id="add-quotite" value="100"></div>
+                <div class="form-group"><label>Téléphone</label><input type="text" id="add-telephone" placeholder="06 00 00 00 00"></div>
+                <div class="form-group"><label>Email</label><input type="email" id="add-email" placeholder="prenom.nom@ac-creteil.fr"></div>
+                <div class="form-group"><label>Heures déjà affectées</label><input type="number" id="add-heures-actuelles" value="0" step="0.5"></div>
+            </div>
+            <div class="form-group">
+                <label id="label-adresse">Établissement de rattachement (RAD)</label>
+                <div class="autocomplete-wrapper">
+                    <input type="text" id="add-adresse" placeholder="Tapez le nom de l'établissement ou l'adresse..." oninput="chercherAdresseOuRAD(this.value)">
+                    <div id="autocomplete-list" class="autocomplete-items"></div>
+                </div>
+                <input type="hidden" id="add-lat"><input type="hidden" id="add-lng">
+            </div>
+            <button class="btn btn-success" style="width:100%; margin-top:10px;" onclick="sauvegarderRemplacant()">💾 Enregistrer le remplaçant</button>
+        </div>
+    </div>
+
+    <!-- Modal 6 : Importer CSV de Remplaçants (TZR / Contractuels) -->
+    <div id="modal-import-remplacants" class="modal-overlay">
+        <div class="modal-content">
+            <button class="modal-close" onclick="fermerModal('modal-import-remplacants')">×</button>
+            <h3 style="margin-top:0;">📥 Importer une liste de TZR / Contractuels (CSV)</h3>
+            <p style="font-size:12px; color:#555;">Format : <code>Nom;Statut;Concours;Nom ou UAI du RAD;Quotité;Téléphone;Email</code></p>
+            <textarea id="csv-remplacants" rows="7" placeholder="M. Langevin;TZR;CAPES Physique-Chimie;Collège Danielle Casanova;100;0611223344;paul.langevin@ac-creteil.fr&#10;Mme Carson;Contractuel;CAPES SVT;Lycée Jean Macé;100;0655667788;rachel.carson@ac-creteil.fr"></textarea>
+            <button class="btn btn-success" style="width:100%; margin-top:10px;" onclick="importerRemplacantsCSV()">Importer dans le vivier</button>
+        </div>
+    </div>
+
+    <!-- Modal 7 : Fiche détaillée d'un Remplaçant + Historique -->
+    <div id="modal-fiche-remp" class="modal-overlay">
+        <div class="modal-content">
+            <button class="modal-close" onclick="fermerModal('modal-fiche-remp')">×</button>
+            <h2 id="fr-nom" style="margin-top:0; color:var(--primary);"></h2>
+            <div id="fr-badges" style="margin-bottom:10px;"></div>
+            <p style="font-size:13px;">📧 <span id="fr-email"></span> | 📞 <span id="fr-tel"></span> | 📍 <span id="fr-adresse"></span></p>
+            <h4>Matières habilitées à enseigner :</h4>
+            <div id="fr-matieres" style="margin-bottom:15px;"></div>
+            <h4>Historique des remplacements :</h4>
+            <table><thead><tr><th>Période</th><th>Établissement</th><th>Prof remplacé</th><th>Matière</th><th>Heures</th></tr></thead><tbody id="fr-historique"></tbody></table>
+        </div>
+    </div>
+
+    <!-- Modal 8 : Nouveau Concours & Nouvelle Matière -->
+    <div id="modal-add-concours" class="modal-overlay">
+        <div class="modal-content" style="width: 420px;">
+            <button class="modal-close" onclick="fermerModal('modal-add-concours')">×</button>
+            <h3 style="margin-top:0;">➕ Créer un Concours / Titre</h3>
+            <div class="form-group"><label>Type</label><select id="new-conc-type"><option>CAPES</option><option>Agrégation</option><option>CAPLP</option><option>CAPET</option><option>Contractuel</option></select></div>
+            <div class="form-group"><label>Intitulé complet</label><input type="text" id="new-conc-nom" placeholder="Ex: CAPET Biotechnologies"></div>
+            <div class="form-group"><label>Obligation de service (h/sem)</label><input type="number" id="new-conc-heures" value="18" step="0.5"></div>
+            <button class="btn btn-success" style="width:100%;" onclick="creerConcours()">Créer le concours</button>
+        </div>
+    </div>
+
+    <div id="modal-add-matiere" class="modal-overlay">
+        <div class="modal-content" style="width: 400px;">
+            <button class="modal-close" onclick="fermerModal('modal-add-matiere')">×</button>
+            <h3 style="margin-top:0;">➕ Créer une Matière</h3>
+            <div class="form-group"><label>Nom de la matière enseignée</label><input type="text" id="new-mat-nom" placeholder="Ex: Biochimie - Génie Biologique"></div>
+            <button class="btn btn-success" style="width:100%;" onclick="creerMatiere()">Créer la matière</button>
+        </div>
+    </div>
+
+    <!-- Modal 9 : Modifier une affectation -->
     <div id="modal-edit-aff" class="modal-overlay">
         <div class="modal-content" style="width: 400px;">
             <button class="modal-close" onclick="fermerModal('modal-edit-aff')">×</button>
-            <h3 style="margin-top:0;">Modifier l'affectation</h3>
-            <p id="modal-edit-aff-titre" style="font-weight:bold; color:var(--primary);"></p>
+            <h3 style="margin-top:0;">✏️ Modifier l'affectation</h3>
+            <p id="edit-aff-titre" style="font-weight:bold; color:var(--primary);"></p>
             <input type="hidden" id="edit-aff-id">
-            <div class="form-group"><label>Volume d'heures</label><input type="number" id="edit-aff-heures" min="0.5" step="0.5"></div>
-            <div class="grid-form">
-                <div class="form-group"><label>Date de début</label><input type="date" id="edit-aff-debut"></div>
-                <div class="form-group"><label>Date de fin</label><input type="date" id="edit-aff-fin"></div>
+            <div class="form-group"><label>Volume d'heures</label><input type="number" id="edit-aff-heures" step="0.5"></div>
+            <div class="grid-2">
+                <div class="form-group"><label>Début</label><input type="date" id="edit-aff-debut"></div>
+                <div class="form-group"><label>Fin</label><input type="date" id="edit-aff-fin"></div>
             </div>
-            <button class="btn btn-edit" style="width:100%; margin-top:15px;" onclick="sauvegarderModifAffectation()">💾 Mettre à jour</button>
+            <button class="btn btn-warning" style="width:100%; margin-top:12px;" onclick="sauvegarderModifAffectation()">Mettre à jour</button>
         </div>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script>
-        let referentiel = {}, matieresFlattened = [], etablissementsData = [], professeursData = [], besoinsData = [], affectationsData = [], autocompleteTimeout = null;
-        let besoinActifContext = null;
-        const API_URL = "https://remplacement-prof-api.onrender.com/api";
-
-        // Initialisation Carte (Chargée uniquement si on va sur la vue)
-        let map, layerPrimaire, layerSecondaire, layerProfs;
-function initMap() {
-            if(!map) {
-                map = L.map('map').setView([48.793, 2.396], 13);
-                L.tileLayer('https://{s}.tile.openstreetmap.fr/osmfr/{z}/{x}/{y}.png', { maxZoom: 20 }).addTo(map);
-                layerPrimaire = L.featureGroup().addTo(map); layerSecondaire = L.featureGroup().addTo(map); layerProfs = L.featureGroup().addTo(map);
-                L.control.layers(null, { "🏫 Écoles primaires": layerPrimaire, "🎓 Collèges & Lycées": layerSecondaire, "👨‍🏫 Professeurs": layerProfs }, { position: 'topright' }).addTo(map);
-                chargerCarteEtablissements();
-                chargerProfesseurs(); // <--- AJOUTEZ CETTE LIGNE ICI
-            }
-            setTimeout(() => map.invalidateSize(), 200);
-        }
-
-        // Chargement initial des données
-        fetch(`${API_URL}/referentiel`).then(res => res.json()).then(data => {
-            referentiel = data;
-            const selectDisciplineRH = document.getElementById('add-discipline'), selectBesoin = document.getElementById('ecole-besoin-matiere');
-            Object.keys(referentiel).forEach(d => {
-                selectDisciplineRH.appendChild(new Option(d, d)); selectBesoin.appendChild(new Option(d, d));
-                matieresFlattened = matieresFlattened.concat(referentiel[d]);
-            });
-            fetch(`${API_URL}/etablissements`).then(res => res.json()).then(etabs => etablissementsData = etabs);
-        });
-
-        // --- NAVIGATION DU PORTAIL ---
-        function deconnexion() {
-            document.getElementById('menu-rectorat').style.display = "none";
-            document.querySelectorAll('.view-container').forEach(el => el.classList.remove('active'));
-            document.getElementById('view-accueil').classList.add('active');
-        }
-
-        function loginRectorat() {
-            document.getElementById('menu-rectorat').style.display = "flex";
-            switchTab('besoins');
-            chargerBesoins(); chargerProfesseurs(); chargerAffectations();
-        }
-
-        function loginEcole() {
-            document.querySelectorAll('.view-container').forEach(el => el.classList.remove('active'));
-            document.getElementById('view-espace-ecole').classList.add('active');
-            let today = new Date(); let future = new Date(); future.setMonth(future.getMonth() + 3);
-            document.getElementById('ecole-besoin-debut').value = today.toISOString().split('T')[0];
-            document.getElementById('ecole-besoin-fin').value = future.toISOString().split('T')[0];
-            document.getElementById('ecole-actions').style.display = "none";
-            document.getElementById('ecole-search').value = "";
-            document.getElementById('ecole-active-nom').innerText = "";
-        }
-
-        function switchTab(tabId) {
-            document.querySelectorAll('.view-container').forEach(el => el.classList.remove('active'));
-            document.querySelectorAll('.nav-item').forEach(el => el.classList.remove('active'));
-            document.getElementById('view-' + tabId).classList.add('active');
-            document.getElementById('nav-' + tabId).classList.add('active');
-            if (tabId === 'map') initMap();
-        }
-
-        // --- ESPACE ÉTABLISSEMENT ---
-        window.chercherEtablissementLocal = function(valeur) {
-            const listDiv = document.getElementById('ecole-autocomplete-list'); listDiv.innerHTML = '';
-            if (valeur.length < 3) return;
-            etablissementsData.filter(e => e.nom.toLowerCase().includes(valeur.toLowerCase())).slice(0, 5).forEach(match => {
-                const item = document.createElement('div'); item.innerHTML = `<strong>${match.nom}</strong>`;
-                item.onclick = function() { 
-                    document.getElementById('ecole-active-uai').value = match.uai; 
-                    document.getElementById('ecole-active-nom').innerText = "📍 " + match.nom;
-                    document.getElementById('ecole-search').value = ""; listDiv.innerHTML = '';
-                    document.getElementById('ecole-actions').style.display = "block";
-                    chargerBesoinsEcole(match.uai);
-                };
-                listDiv.appendChild(item);
-            });
-        };
-
-        function chargerBesoinsEcole(uai) {
-            fetch(`${API_URL}/besoins`).then(res => res.json()).then(besoins => {
-                const mesBesoins = besoins.filter(b => b.uai === uai);
-                const tbody = document.getElementById('ecole-table-besoins'); tbody.innerHTML = "";
-                mesBesoins.forEach(b => {
-                    tbody.innerHTML += `<tr><td>${b.discipline}</td><td>${b.date_debut} ➔ ${b.date_fin}</td><td>${b.heures}h</td><td><span class="badge red">En attente rectorat</span></td></tr>`;
-                });
-                
-                // On ajoute aussi les affectations en cours pour cet établissement
-                fetch(`${API_URL}/affectations`).then(res => res.json()).then(affs => {
-                    const mesAffs = affs.filter(a => a.uai === uai);
-                    mesAffs.forEach(a => {
-                        tbody.innerHTML += `<tr><td>${a.discipline}</td><td>${a.date_debut} ➔ ${a.date_fin}</td><td>${a.heures}h</td><td><span class="badge green">Pourvu par ${a.nom_prof}</span></td></tr>`;
-                    });
-                });
-            });
-        }
-
-        window.ecoleAjouterBesoin = function() {
-            const data = {
-                uai: document.getElementById('ecole-active-uai').value, discipline: document.getElementById('ecole-besoin-matiere').value,
-                heures: parseFloat(document.getElementById('ecole-besoin-heures').value), date_debut: document.getElementById('ecole-besoin-debut').value, date_fin: document.getElementById('ecole-besoin-fin').value
-            };
-            if(!data.date_debut || !data.date_fin) return alert("Dates obligatoires.");
-            fetch(`${API_URL}/besoins`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data) })
-            .then(() => { alert("Besoin transmis au rectorat."); chargerBesoinsEcole(data.uai); });
-        };
-
-        // --- ESPACE RECTORAT (Besoins & Affectations) ---
-        function chargerBesoins() {
-            fetch(`${API_URL}/besoins`).then(res => res.json()).then(besoins => {
-                const tbody = document.getElementById('table-besoins-body'); tbody.innerHTML = "";
-                besoins.forEach(b => {
-                    tbody.innerHTML += `<tr>
-                        <td><strong>${b.nom_etablissement}</strong></td><td>${b.discipline}</td>
-                        <td>${b.date_debut} ➔ ${b.date_fin}</td><td><span class="badge red">${b.heures}h</span></td>
-                        <td><button class="btn-small btn-info" onclick="lancerAffectation(${b.id}, ${b.latitude}, ${b.longitude}, '${b.nom_etablissement.replace(/'/g, "\\'")}', '${b.discipline}', ${b.heures})">🗺️ Assigner</button></td>
-                    </tr>`;
-                });
-            });
-        }
-
-        function chargerAffectations() {
-            fetch(`${API_URL}/affectations`).then(res => res.json()).then(data => {
-                const tbody = document.getElementById('table-affectations-body'); tbody.innerHTML = "";
-                data.forEach(a => {
-                    tbody.innerHTML += `<tr>
-                        <td><strong>${a.nom_prof}</strong></td><td>${a.nom_etablissement}</td><td>${a.discipline}</td>
-                        <td>${a.date_debut} ➔ ${a.date_fin}</td><td><span class="badge blue">${a.heures}h</span></td>
-                        <td><button class="btn-small btn-edit" onclick="ouvrirEditAff(${a.id}, '${a.nom_prof.replace(/'/g, "\\'")}', '${a.nom_etablissement.replace(/'/g, "\\'")}', ${a.heures}, '${a.date_debut}', '${a.date_fin}')">✏️</button>
-                        <button class="btn-small btn-delete" onclick="supprimerAffectation(${a.id})">🗑️</button></td>
-                    </tr>`;
-                });
-            });
-        }
-
-        // Matching & Assignation
-        window.lancerAffectation = function(besoin_id, lat, lng, nomEtab, discipline, heures) {
-            besoinActifContext = besoin_id; switchTab('map'); map.setView([lat, lng], 14);
-            fetch(`${API_URL}/match?lat=${lat}&lng=${lng}&matiere=${encodeURIComponent(discipline)}&heures_requises=${heures}&rayon_metres=10000`)
-                .then(res => res.json()).then(profs => {
-                    const searchBox = document.getElementById('search-results');
-                    let html = `<div style="background: #f8f9fa; padding: 15px; border-radius: 5px; border-left: 4px solid var(--primary); margin-bottom: 15px;"><h4>${nomEtab}</h4>Besoin : <b>${heures}h</b> en <b>${discipline}</b></div>`;
-                    if (profs.length === 0) html += `<p style="color:red;">Aucun professeur dispo à 10km.</p>`;
-                    else {
-                        profs.forEach(p => {
-                            html += `<div class="card" style="padding: 15px; margin-bottom:10px;">
-                                        <strong>${p.nom}</strong> <span class="badge">${p.statut}</span><br>
-                                        <span class="badge green">Dispo : ${p.heures_restantes}h</span>
-                                        <button class="btn" style="width: 100%; margin-top: 10px;" onclick="validerAffectation(${p.id}, '${p.nom.replace(/'/g, "\\'")}')">Affecter</button>
-                                    </div>`;
-                        });
-                    }
-                    searchBox.innerHTML = html;
-                });
-        };
-
-        window.validerAffectation = function(prof_id, nomProf) {
-            fetch(`${API_URL}/affecter`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ prof_id: prof_id, besoin_id: besoinActifContext }) })
-            .then(() => { document.getElementById('search-results').innerHTML = `<p style="color:green;">✅ Validé.</p>`; chargerBesoins(); chargerAffectations(); chargerProfesseurs(); });
-        };
-
-        window.ouvrirEditAff = function(id, prof, etab, heures, debut, fin) {
-            document.getElementById('edit-aff-id').value = id; document.getElementById('modal-edit-aff-titre').innerText = prof + " à " + etab;
-            document.getElementById('edit-aff-heures').value = heures; document.getElementById('edit-aff-debut').value = debut; document.getElementById('edit-aff-fin').value = fin;
-            document.getElementById('modal-edit-aff').style.display = "flex";
-        };
-
-        window.sauvegarderModifAffectation = function() {
-            const id = document.getElementById('edit-aff-id').value;
-            const data = { heures: parseFloat(document.getElementById('edit-aff-heures').value), date_debut: document.getElementById('edit-aff-debut').value, date_fin: document.getElementById('edit-aff-fin').value };
-            fetch(`${API_URL}/affectations/${id}`, { method: 'PUT', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data) }).then(() => { fermerModal('modal-edit-aff'); chargerAffectations(); chargerProfesseurs(); });
-        };
-        window.supprimerAffectation = function(id) { if(confirm("Annuler l'affectation ?")) fetch(`${API_URL}/affectations/${id}`, { method: 'DELETE' }).then(() => { chargerAffectations(); chargerProfesseurs(); }); };
-
-        // --- GESTION PROFESSEURS ---
-        function chargerProfesseurs() {
-            fetch(`${API_URL}/professeurs`).then(res => res.json()).then(profs => {
-                professeursData = profs; const tbody = document.getElementById('table-profs-body'); tbody.innerHTML = "";
-                if(layerProfs) layerProfs.clearLayers();
-                profs.forEach(p => { 
-                    tbody.innerHTML += `<tr>
-                        <td><strong>${p.nom}</strong></td><td><span class="badge">${p.statut}</span></td><td>${p.discipline}</td><td>${p.adresse}</td>
-                        <td><span class="badge green">${p.heures_restantes}h libres</span></td>
-                        <td><button class="btn-small btn-info" onclick="afficherFicheProf(${p.id})">👁️ Fiche</button>
-                        <button class="btn-small btn-edit" onclick="editerProf(${p.id})">✏️</button><button class="btn-small btn-delete" onclick="supprimerProf(${p.id})">🗑️</button></td>
-                    </tr>`; 
-                    if (p.latitude && layerProfs) {
-                        L.marker([p.latitude, p.longitude], { icon: L.icon({ iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-${p.heures_restantes > 0 ? "green" : "grey"}.png`, shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png', iconSize: [25, 41], iconAnchor: [12, 41] }) })
-                        .bindPopup(`<strong>${p.nom}</strong><br><b>Dispo : ${p.heures_restantes}h</b>`).addTo(layerProfs);
-                    }
-                });
-            });
-        }
-        window.afficherFicheProf = function(id) {
-            const prof = professeursData.find(p => p.id === id);
-            document.getElementById('modal-prof-nom').innerText = prof.nom;
-            document.getElementById('modal-prof-badges').innerHTML = `<span class="badge">${prof.statut}</span><span class="badge">${prof.corps}</span><span class="badge" style="background:var(--primary); color:white;">${prof.discipline}</span>`;
-            document.getElementById('modal-prof-email').innerText = prof.email || '-'; document.getElementById('modal-prof-tel').innerText = prof.telephone || '-';
-            fetch(`${API_URL}/professeurs/${id}/historique`).then(res => res.json()).then(historique => {
-                const tbody = document.getElementById('modal-prof-historique'); tbody.innerHTML = "";
-                historique.forEach(h => tbody.innerHTML += `<tr><td>${h.date_debut} ➔ ${h.date_fin}</td><td><strong>${h.etablissement}</strong></td><td>${h.discipline}</td><td>${h.heures}h</td></tr>`);
-                document.getElementById('modal-prof').style.display = "flex";
-            });
-        };
-
-        // Formulaire prof
-        function updateFormUI() {
-            const statut = document.getElementById('add-statut').value; const label = document.getElementById('label-adresse');
-            document.getElementById('add-adresse').value = ''; document.getElementById('add-lat').value = ''; document.getElementById('add-lng').value = '';
-            if(statut === "TZR") { label.innerText = "Établissement de rattachement (RAD)"; } else { label.innerText = "Adresse personnelle complète"; document.getElementById('add-corps').value = "Contractuel"; }
-        }
-        window.chercherAdresseOuEtablissement = function(valeur) {
-            const listDiv = document.getElementById('autocomplete-list'); listDiv.innerHTML = '';
-            if (valeur.length < 3) return;
-            if (document.getElementById('add-statut').value === "TZR") {
-                etablissementsData.filter(e => e.nom.toLowerCase().includes(valeur.toLowerCase())).slice(0, 5).forEach(m => {
-                    const i = document.createElement('div'); i.innerHTML = `<strong>${m.nom}</strong>`;
-                    i.onclick = function() { document.getElementById('add-adresse').value = m.nom; document.getElementById('add-lat').value = m.latitude; document.getElementById('add-lng').value = m.longitude; listDiv.innerHTML = ''; };
-                    listDiv.appendChild(i);
-                });
-            } else {
-                clearTimeout(autocompleteTimeout); autocompleteTimeout = setTimeout(() => {
-                    fetch(`https://api-adresse.data.gouv.fr/search/?q=${encodeURIComponent(valeur)}&autocomplete=1&limit=5`).then(res => res.json()).then(data => {
-                        if(data.features) data.features.forEach(f => {
-                            const i = document.createElement('div'); i.innerHTML = `<strong>${f.properties.name}</strong> <small>(${f.properties.city})</small>`;
-                            i.onclick = function() { document.getElementById('add-adresse').value = f.properties.label; document.getElementById('add-lng').value = f.geometry.coordinates[0]; document.getElementById('add-lat').value = f.geometry.coordinates[1]; listDiv.innerHTML = ''; };
-                            listDiv.appendChild(i);
-                        });
-                    });
-                }, 300);
-            }
-        };
-        window.sauvegarderProf = function() {
-            const lat = document.getElementById('add-lat').value; if(!lat) return alert("Sélectionnez une adresse valide.");
-            const profId = document.getElementById('edit-id').value;
-            const method = profId ? 'PUT' : 'POST', url = profId ? `${API_URL}/professeurs/${profId}` : `${API_URL}/professeurs`;
-            fetch(url, { method: method, headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    nom: document.getElementById('add-nom').value, statut: document.getElementById('add-statut').value, corps: document.getElementById('add-corps').value,
-                    discipline: document.getElementById('add-discipline').value, adresse_libelle: document.getElementById('add-adresse').value, type_adresse: document.getElementById('add-statut').value === "TZR" ? "Rattachement" : "Personnelle",
-                    latitude: parseFloat(lat), longitude: parseFloat(document.getElementById('add-lng').value), quotite: parseFloat(document.getElementById('add-quotite').value),
-                    heures_actuelles: parseFloat(document.getElementById('add-heures-actuelles').value), telephone: document.getElementById('add-telephone').value, email: document.getElementById('add-email').value
-                })
-            }).then(() => { chargerProfesseurs(); resetForm(); });
-        };
-        window.editerProf = function(id) {
-            const p = professeursData.find(p => p.id === id);
-            document.getElementById('edit-id').value = p.id; document.getElementById('form-title').innerText = `Modifier : ${p.nom}`;
-            document.getElementById('btn-save').innerText = "🔄 Mettre à jour"; document.getElementById('btn-cancel').style.display = "block";
-            document.getElementById('add-nom').value = p.nom; document.getElementById('add-discipline').value = p.discipline; document.getElementById('add-statut').value = p.statut; document.getElementById('add-corps').value = p.corps;
-            document.getElementById('add-telephone').value = p.telephone || ""; document.getElementById('add-email').value = p.email || ""; document.getElementById('add-heures-actuelles').value = p.heures_actuelles;
-            document.getElementById('add-quotite').value = Math.round((p.heures_max / (p.corps === "Agrégé" ? 15 : 18)) * 100);
-            document.getElementById('add-adresse').value = p.adresse; document.getElementById('add-lat').value = p.latitude; document.getElementById('add-lng').value = p.longitude;
-        };
-        window.resetForm = function() { document.getElementById('edit-id').value = ""; document.getElementById('form-title').innerText = "Créer une fiche"; document.getElementById('btn-save').innerText = "💾 Enregistrer"; document.getElementById('btn-cancel').style.display = "none"; ['add-nom', 'add-telephone', 'add-email', 'add-adresse', 'add-lat', 'add-lng'].forEach(id => document.getElementById(id).value = ""); document.getElementById('add-heures-actuelles').value = "0"; document.getElementById('add-quotite').value = "100"; updateFormUI(); };
-        window.supprimerProf = function(id) { if(confirm("Supprimer ?")) fetch(`${API_URL}/professeurs/${id}`, { method: 'DELETE' }).then(() => chargerProfesseurs()); };
-        window.fermerModal = function(id) { document.getElementById(id).style.display = "none"; };
-        document.addEventListener("click", function (e) { if(e.target.id !== "add-adresse" && e.target.id !== "ecole-search") document.querySelectorAll('.autocomplete-items').forEach(el => el.innerHTML = ''); });
-        function chargerCarteEtablissements() {
-            if(!layerPrimaire) return; layerPrimaire.clearLayers(); layerSecondaire.clearLayers();
-            etablissementsData.forEach(etab => {
-                if (etab.degre === "Autre") return;
-                L.marker([etab.latitude, etab.longitude], { icon: L.icon({ iconUrl: `https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-2x-${etab.degre === "Secondaire" ? "red" : "blue"}.png`, shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.7/images/marker-shadow.png', iconSize: [25, 41], iconAnchor: [12, 41] }) }).bindPopup(`<strong>${etab.nom}</strong>`).addTo(etab.degre === "Secondaire" ? layerSecondaire : layerPrimaire);
-            });
-        }
-    </script>
+    <script src="app.js"></script>
 </body>
 </html>
