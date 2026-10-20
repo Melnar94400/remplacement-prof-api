@@ -13,10 +13,10 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"])
 
 def get_db_connection():
     return psycopg2.connect(
-        host="db.scacemkfeugwaugxprhh.supabase.co",
-        port="5432",
+        host="aws-0-eu-west-1.pooler.supabase.com",
+        port="6543",
         database="postgres",
-        user="postgres",
+        user="postgres.scacemkfeugwaugxprhh",
         password=os.getenv("SUPABASE_PASSWORD")
     )
 
