@@ -4,7 +4,9 @@ import io
 import json
 import base64
 import urllib.request
+import urllib.parse
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -588,37 +590,160 @@ def supprimer_remplacant(remp_id: int):
     conn.close()
     return {"status": "deleted"}
 
-# --- 5. MATCHING SPATIAL, POLYVALENCE & HORAIRES TC (PRIM IDFM) ---
-def prochain_jour_ouvre_8h():
-    now = datetime.now()
-    jours_ajout = 1
-    while (now + timedelta(days=jours_ajout)).weekday() >= 5:
-        jours_ajout += 1
-    cible = now + timedelta(days=jours_ajout)
-    return cible.strftime("%Y%m%dT080000")
+# --- 5. MATCHING SPATIAL & CALENDRIER SCOLAIRE DYNAMIQUE MULTI-ZONES ---
+DEPT_VERS_ZONE = {
+    "001": "Zone A", "003": "Zone A", "007": "Zone A", "015": "Zone A", "016": "Zone A",
+    "017": "Zone A", "019": "Zone A", "021": "Zone A", "023": "Zone A", "024": "Zone A",
+    "025": "Zone A", "026": "Zone A", "033": "Zone A", "038": "Zone A", "039": "Zone A",
+    "040": "Zone A", "042": "Zone A", "043": "Zone A", "047": "Zone A", "058": "Zone A",
+    "063": "Zone A", "064": "Zone A", "069": "Zone A", "070": "Zone A", "071": "Zone A",
+    "073": "Zone A", "074": "Zone A", "079": "Zone A", "086": "Zone A", "087": "Zone A",
+    "089": "Zone A", "090": "Zone A",
+    "002": "Zone B", "004": "Zone B", "005": "Zone B", "006": "Zone B", "008": "Zone B",
+    "010": "Zone B", "013": "Zone B", "014": "Zone B", "018": "Zone B", "022": "Zone B",
+    "027": "Zone B", "028": "Zone B", "029": "Zone B", "035": "Zone B", "036": "Zone B",
+    "037": "Zone B", "041": "Zone B", "044": "Zone B", "045": "Zone B", "049": "Zone B",
+    "050": "Zone B", "051": "Zone B", "052": "Zone B", "053": "Zone B", "054": "Zone B",
+    "055": "Zone B", "056": "Zone B", "057": "Zone B", "059": "Zone B", "060": "Zone B",
+    "061": "Zone B", "062": "Zone B", "067": "Zone B", "068": "Zone B", "072": "Zone B",
+    "076": "Zone B", "080": "Zone B", "083": "Zone B", "084": "Zone B", "085": "Zone B",
+    "088": "Zone B",
+    "009": "Zone C", "011": "Zone C", "012": "Zone C", "030": "Zone C", "031": "Zone C",
+    "032": "Zone C", "034": "Zone C", "046": "Zone C", "048": "Zone C", "065": "Zone C",
+    "066": "Zone C", "075": "Zone C", "077": "Zone C", "078": "Zone C", "081": "Zone C",
+    "082": "Zone C", "091": "Zone C", "092": "Zone C", "093": "Zone C", "094": "Zone C",
+    "095": "Zone C",
+    "020": "Corse", "02A": "Corse", "02B": "Corse", "620": "Corse", "720": "Corse",
+    "971": "Guadeloupe", "972": "Martinique", "973": "Guyane", "974": "La Réunion", "976": "Mayotte"
+}
 
-def calculer_tc_idfm(lat_dep, lng_dep, lat_arr, lng_arr):
+DEPTS_IDF = {"075", "077", "078", "091", "092", "093", "094", "095"}
+_CACHE_CALENDRIER = {}
+
+def extraire_infos_geo_uai(uai: str):
+    prefix = (uai or "")[:3].upper()
+    zone_scolaire = DEPT_VERS_ZONE.get(prefix, "Zone C")
+    est_idf = prefix in DEPTS_IDF
+    
+    if prefix in ("057", "067", "068"):
+        zone_feries = "alsace-moselle"
+    elif prefix == "971":
+        zone_feries = "guadeloupe"
+    elif prefix == "972":
+        zone_feries = "martinique"
+    elif prefix == "973":
+        zone_feries = "guyane"
+    elif prefix == "974":
+        zone_feries = "la-reunion"
+    elif prefix == "976":
+        zone_feries = "mayotte"
+    else:
+        zone_feries = "metropole"
+        
+    return zone_scolaire, zone_feries, est_idf
+
+def charger_calendrier_officiel(zone_scolaire: str, zone_feries: str):
+    cle_cache = f"{zone_scolaire}_{zone_feries}"
+    now = datetime.now()
+    
+    if cle_cache in _CACHE_CALENDRIER:
+        date_maj, periodes_vacances, jours_feries = _CACHE_CALENDRIER[cle_cache]
+        if (now - date_maj).total_seconds() < 86400:
+            return periodes_vacances, jours_feries
+
+    periodes_vacances = []
+    jours_feries = set()
+    tz_paris = ZoneInfo("Europe/Paris")
+
+    try:
+        url_feries = f"https://calendrier.api.gouv.fr/jours-feries/{zone_feries}.json"
+        with urllib.request.urlopen(url_feries, timeout=4) as resp:
+            data_feries = json.loads(resp.read().decode())
+            jours_feries = set(data_feries.keys())
+    except Exception as e:
+        print(f"Avertissement API Jours Fériés ({zone_feries}) :", e)
+
+    try:
+        date_min = (now - timedelta(days=15)).strftime("%Y-%m-%d")
+        clause_where = f'zones="{zone_scolaire}" AND end_date>="{date_min}"'
+        url_vac = (
+            "https://data.education.gouv.fr/api/explore/v2.1/catalog/datasets/"
+            f"fr-en-calendrier-scolaire/records?where={urllib.parse.quote(clause_where)}&limit=100"
+        )
+        with urllib.request.urlopen(url_vac, timeout=4) as resp:
+            data_vac = json.loads(resp.read().decode())
+            for rec in data_vac.get("results", []):
+                if rec.get("population") == "Enseignants":
+                    continue
+                deb_str = rec.get("start_date")
+                fin_str = rec.get("end_date")
+                if deb_str and fin_str:
+                    deb_date = datetime.fromisoformat(deb_str).astimezone(tz_paris).strftime("%Y-%m-%d")
+                    fin_date = datetime.fromisoformat(fin_str).astimezone(tz_paris).strftime("%Y-%m-%d")
+                    periodes_vacances.append((deb_date, fin_date))
+    except Exception as e:
+        print(f"Avertissement API Calendrier Scolaire ({zone_scolaire}) :", e)
+
+    _CACHE_CALENDRIER[cle_cache] = (now, periodes_vacances, jours_feries)
+    return periodes_vacances, jours_feries
+
+def est_jour_scolaire_ordinaire(dt_date, periodes_vacances, jours_feries):
+    if dt_date.weekday() not in (1, 3):
+        return False
+    iso = dt_date.strftime("%Y-%m-%d")
+    if iso in jours_feries:
+        return False
+    for deb, fin in periodes_vacances:
+        if deb <= iso < fin:
+            return False
+    return True
+
+def trouver_jour_scolaire_8h(uai: str):
+    zone_scolaire, zone_feries, est_idf = extraire_infos_geo_uai(uai)
+    periodes_vacances, jours_feries = charger_calendrier_officiel(zone_scolaire, zone_feries)
+    tz_paris = ZoneInfo("Europe/Paris")
+    now = datetime.now(tz_paris)
+
+    cible = None
+    for delta in range(1, 36):
+        candidat = now + timedelta(days=delta)
+        if est_jour_scolaire_ordinaire(candidat, periodes_vacances, jours_feries):
+            cible = candidat.replace(hour=8, minute=0, second=0, microsecond=0)
+            break
+
+    if not cible:
+        for delta in range(1, 11):
+            candidat = now - timedelta(days=delta)
+            if est_jour_scolaire_ordinaire(candidat, periodes_vacances, jours_feries):
+                cible = candidat.replace(hour=8, minute=0, second=0, microsecond=0)
+                break
+    if not cible:
+        jours_mardi = (1 - now.weekday()) % 7 or 7
+        cible = (now + timedelta(days=jours_mardi)).replace(hour=8, minute=0, second=0, microsecond=0)
+
+    jours_fr = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
+    label_fr = f"{jours_fr[cible.weekday()]} {cible.strftime('%d/%m/%Y')} à 08h00 ({zone_scolaire})"
+    return cible.strftime("%Y%m%dT080000"), int(cible.timestamp()), label_fr, est_idf
+
+def calculer_tc_multiregion(lat_dep, lng_dep, lat_arr, lng_arr, dt_navitia, est_idf):
     if lat_dep is None or lng_dep is None or lat_arr is None or lng_arr is None:
         return None, None
 
     prim_token = os.getenv("PRIM_API_TOKEN")
     navitia_token = os.getenv("NAVITIA_TOKEN")
-    if not prim_token and not navitia_token:
-        return None, None
 
     try:
-        dt = prochain_jour_ouvre_8h()
-        if prim_token:
-            # Point d'accès officiel PRIM Île-de-France Mobilités
-            url = f"https://prim.iledefrance-mobilites.fr/marketplace/v2/navitia/journeys?from={lng_dep};{lat_dep}&to={lng_arr};{lat_arr}&datetime={dt}&datetime_represents=arrival&count=1"
+        if est_idf and prim_token:
+            url = f"https://prim.iledefrance-mobilites.fr/marketplace/v2/navitia/journeys?from={lng_dep};{lat_dep}&to={lng_arr};{lat_arr}&datetime={dt_navitia}&datetime_represents=arrival&count=1"
             req = urllib.request.Request(url)
             req.add_header("apikey", prim_token.strip())
-        else:
-            # Point d'accès Navitia.io standard
-            url = f"https://api.navitia.io/v1/coverage/fr-idf/journeys?from={lng_dep};{lat_dep}&to={lng_arr};{lat_arr}&datetime={dt}&datetime_represents=arrival&count=1"
+        elif navitia_token:
+            url = f"https://api.navitia.io/v1/journeys?from={lng_dep};{lat_dep}&to={lng_arr};{lat_arr}&datetime={dt_navitia}&datetime_represents=arrival&count=1"
             req = urllib.request.Request(url)
             auth = base64.b64encode(f"{navitia_token.strip()}:".encode()).decode()
             req.add_header("Authorization", f"Basic {auth}")
+        else:
+            return None, None
 
         with urllib.request.urlopen(req, timeout=5) as resp:
             data = json.loads(resp.read().decode())
@@ -633,7 +758,7 @@ def calculer_tc_idfm(lat_dep, lng_dep, lat_arr, lng_arr):
                 resume_lignes = " ➔ ".join(lignes) if lignes else "Marche directe"
                 return duree_min, resume_lignes
     except Exception as e:
-        print("Erreur API TC IDFM :", e)
+        print("Erreur API TC :", e)
     return None, None
 
 @app.get("/api/match")
@@ -668,14 +793,17 @@ def match_remplacants(besoin_id: int):
     cur.close()
     conn.close()
 
+    dt_navitia, ts_8h, date_label, est_idf = trouver_jour_scolaire_8h(uai)
+
     res = []
     for r in rows:
-        tc_min, tc_lignes = calculer_tc_idfm(r[8], r[9], r[11], r[12])
+        tc_min, tc_lignes = calculer_tc_multiregion(r[8], r[9], r[11], r[12], dt_navitia, est_idf)
         res.append({
             "id": r[0], "nom": r[1], "statut": r[2], "concours": r[3], "adresse": r[4],
             "heures_restantes": r[5], "telephone": r[6], "email": r[7],
             "latitude": r[8], "longitude": r[9], "distance_km": float(r[10] or 0.0),
-            "tc_minutes": tc_min, "tc_lignes": tc_lignes
+            "tc_minutes": tc_min, "tc_lignes": tc_lignes,
+            "tc_timestamp_8h": ts_8h, "tc_date_label": date_label
         })
     return res
 
